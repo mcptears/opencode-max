@@ -102,6 +102,69 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ accounts: pool.status() });
   });
 
+  /** Check an API key against upstream without adding it (Connect flow).
+   *  The models catalog is public, so validation sends a minimal 1-token
+   *  chat ping: 401 with an auth-flavoured body means a bad key; anything
+   *  else (200, 429, model errors) means the key itself is accepted. */
+  router.post('/api/accounts/validate', async (req, res) => {
+    const body = jsonBody(req) as { apiKey?: unknown; baseUrl?: unknown };
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (!apiKey) {
+      res.status(400).json({ ok: false, error: 'API key is required' });
+      return;
+    }
+    const base =
+      typeof body.baseUrl === 'string' && body.baseUrl
+        ? body.baseUrl.replace(/\/+$/, '')
+        : getSettings().upstreamBase;
+    const authHeaders = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' };
+    const withTimeout = async (url: string, init: RequestInit): Promise<Response> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        return await fetch(url, { ...init, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    try {
+      // Pick a real, non-free model for the ping.
+      const modelsRes = await withTimeout(`${base}/models`, { headers: authHeaders });
+      if (modelsRes.status === 401 || modelsRes.status === 403) {
+        res.json({ ok: false, error: 'key rejected by upstream (401/403) — check the key' });
+        return;
+      }
+      let model = 'big-pickle';
+      try {
+        const catalog = (await modelsRes.json()) as { data?: { id?: string }[] };
+        const ids = (catalog.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string');
+        model = ids.find((id) => !id.endsWith('-free')) ?? ids[0] ?? model;
+      } catch {
+        /* fall back to default probe model */
+      }
+      const ping = await withTimeout(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+      });
+      if (ping.status === 401) {
+        let probe = '';
+        try {
+          probe = await ping.text();
+        } catch {
+          /* ignore */
+        }
+        if (/invalid|unauthorized|api.?key|bad.?credentials|incorrect/i.test(probe) && !/quota|rate/i.test(probe)) {
+          res.json({ ok: false, error: 'key rejected by upstream — check the key' });
+          return;
+        }
+      }
+      res.json({ ok: true });
+    } catch {
+      res.json({ ok: false, error: 'could not reach upstream — check your connection' });
+    }
+  });
+
   router.post('/api/accounts', (req, res) => {
     const v = validateAccount(jsonBody(req));
     if (!v.ok) {
