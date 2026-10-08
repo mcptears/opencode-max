@@ -23,8 +23,9 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 30 unit tests, `npm test` |
+| 🧪 | **Tested** | 34 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
+| 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 
 ## ⚙️ How it works
 
@@ -91,6 +92,27 @@ The dashboard's **Connect OpenCode account** button opens a guided modal:
 4. ✅ Added to the pool instantly with an auto id
 
 The server also boots with an empty pool, so connecting from the dashboard is the first-run onboarding path.
+
+## 🕷️ Proxy scraper
+
+The Proxies section has a **Scraper** tab that fills your pool from free proxy lists:
+
+1. **Providers** — 4 curated sources ship built-in (ProxyScrape, TheSpeedX, monosans, GeoNode). Enable/disable them, or **add your own** (text `ip:port` lists or GeoNode JSON).
+2. **Scrape now** — fetches every enabled provider, dedupes candidates, and tests up to 120 of them with 8-way concurrency.
+3. **Working proxies join the pool automatically** — the health checker keeps weeding out the flaky ones afterwards.
+
+There's also an **Add** tab: paste proxies, each line is tested before it joins the pool — dead ones are listed and skipped.
+
+```bash
+# API
+GET    /api/scraper/providers      # list providers
+POST   /api/scraper/providers      # add one { name, url, format }
+PUT    /api/scraper/providers/:id  # edit / enable / disable
+DELETE /api/scraper/providers/:id
+POST   /api/scraper/run            # start a scrape (async)
+GET    /api/scraper/status         # poll progress / result
+POST   /api/proxies/test           # test proxies without adding
+```
 
 ## 🐳 Docker
 
@@ -198,7 +220,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 30 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 34 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
