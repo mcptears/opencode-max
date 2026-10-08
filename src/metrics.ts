@@ -36,9 +36,9 @@ export class Metrics {
     this.record('rate_limited', `429/quota on ${accountId} — token parked, IP rotated`);
   }
 
-  rotated(proxy: string | null): void {
+  rotated(label: string): void {
     this.rotations += 1;
-    this.record('rotated', `egress rotated → ${proxy ?? 'direct'}`);
+    this.record('rotated', `egress rotated → ${label}`);
   }
 
   retried(): void {
