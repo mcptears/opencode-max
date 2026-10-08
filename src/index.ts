@@ -70,6 +70,13 @@ async function main(): Promise<void> {
   const sessions = new SessionManager();
   const metrics = new Metrics();
 
+  rotator.onHealthChange = (proxy, healthy) => {
+    metrics.record(healthy ? 'rotated' : 'error', `proxy ${healthy ? 'recovered' : 'unhealthy, skipped in rotation'}: ${proxy}`);
+  };
+  if (settings.proxyHealthCheck) {
+    rotator.startHealthChecks(settings.proxyHealthIntervalMs);
+  }
+
   const app = express();
   app.disable('x-powered-by');
   app.use(express.raw({ type: () => true, limit: '25mb' }));
@@ -101,6 +108,7 @@ async function main(): Promise<void> {
 
   const shutdown = (): void => {
     console.log('\nshutting down…');
+    rotator.stopHealthChecks();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1500).unref();
   };
