@@ -61,6 +61,17 @@ export class ZenClient {
   async forward(req: ForwardRequest): Promise<ForwardResult> {
     let lastError: unknown = null;
     const maxRetries = getSettings().maxRetries;
+    const startedAt = Date.now();
+    let lastAccountId = '';
+    let model: string | undefined;
+    if (req.bodyText) {
+      try {
+        const parsed = JSON.parse(req.bodyText) as { model?: unknown };
+        if (typeof parsed.model === 'string') model = parsed.model;
+      } catch {
+        /* ignore */
+      }
+    }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const account = this.pool.acquire(req.provider);
@@ -68,8 +79,10 @@ export class ZenClient {
         const msg = this.pool.allInvalid(req.provider)
           ? 'all API keys are flagged invalid — fix them in the dashboard and reset'
           : 'all accounts exhausted (rate-limited or none configured)';
+        this.metrics?.logRequest(lastAccountId || 'none', 503, Date.now() - startedAt, model);
         throw httpError(503, msg);
       }
+      lastAccountId = account.id;
       this.metrics?.hit(account.id);
 
       const proxy = this.rotator.current();
@@ -143,6 +156,7 @@ export class ZenClient {
           }
         }
         this.metrics?.ok();
+        this.metrics?.logRequest(account.id, upstream.status, Date.now() - startedAt, model);
         return this.toResult(upstream);
       }
 
@@ -163,6 +177,7 @@ export class ZenClient {
       await sleep(backoff(attempt));
     }
 
+    this.metrics?.logRequest(lastAccountId || 'none', 502, Date.now() - startedAt, model);
     throw httpError(502, `upstream unreachable after ${maxRetries + 1} attempts: ${String(lastError)}`);
   }
 
