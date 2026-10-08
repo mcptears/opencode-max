@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseProxies, parseSpysProxies, DEFAULT_PROVIDERS } from '../scraper.js';
+import { parseProxies, parseSpysProxies, parseFplProxies, parseProxynovaProxies, DEFAULT_PROVIDERS } from '../scraper.js';
 
 describe('scraper parseProxies', () => {
   it('parses text lists (ip:port and full URLs)', () => {
@@ -24,11 +24,11 @@ describe('scraper parseProxies', () => {
   });
 
   it('ships curated default providers', () => {
-    expect(DEFAULT_PROVIDERS.length).toBeGreaterThanOrEqual(5);
+    expect(DEFAULT_PROVIDERS.length).toBeGreaterThanOrEqual(7);
     for (const p of DEFAULT_PROVIDERS) {
       expect(p.id).toBeTruthy();
       expect(p.url).toMatch(/^https:\/\//);
-      expect(['text', 'geonode', 'spys']).toContain(p.format);
+      expect(['text', 'geonode', 'spys', 'fpl', 'proxynova']).toContain(p.format);
     }
   });
 
@@ -41,5 +41,17 @@ describe('scraper parseProxies', () => {
       `<font class=spy14>1.2.3.4<script>document.write(":"+(Six^Zero))</script></font></td><td colspan=1><font class=spy1>HTTP</font>` +
       `<font class=spy14>5.6.7.8<script>document.write(":"+(Six^Zero))</script></font></td><td colspan=1><font class=spy1>SOCKS</font>`;
     expect(parseSpysProxies(html)).toEqual(['http://1.2.3.4:808']);
+  });
+
+  it('parses free-proxy-list.net table rows', () => {
+    const html = `<table><tr><td>65.108.159.129</td><td>8081</td><td>DE</td></tr>` +
+      `<tr><td>165.154.162.73</td><td>8888</td><td>US</td></tr></table>`;
+    expect(parseFplProxies(html)).toEqual(['http://65.108.159.129:8081', 'http://165.154.162.73:8888']);
+  });
+
+  it('evaluates proxynova obfuscated IP expressions', () => {
+    const html = `<tr data-proxy-id="1"><td align="left"><script>document.write("1.07.947.91.120.191.07".substring(10-4, 9+9))</script></td><td>1234</td></tr>` +
+      `<tr data-proxy-id="2"><td align="left"><script>document.write("8.".repeat(3).substring(4).concat("219.229.53".repeat(1).substring(0)))</script></td><td>80</td></tr>`;
+    expect(parseProxynovaProxies(html)).toEqual(['http://47.91.120.19:1234', 'http://8.219.229.53:80']);
   });
 });
