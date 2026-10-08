@@ -49,17 +49,41 @@
           <div class="panel-head"><h3>Accounts</h3><span class="hint">API keys are stored locally and never displayed</span></div>
           <table class="tbl" id="accountsTbl"><thead><tr><th>ID</th><th>Name</th><th>Provider</th><th>Priority</th><th>5h usage</th><th>State</th><th>Cooldown</th><th></th></tr></thead><tbody></tbody></table>
           <h4 class="sub">Add account</h4>
-          <form id="accountForm" class="form-grid">
-            <input name="id" placeholder="id · e.g. zen-p1" required>
-            <input name="name" placeholder="display name">
-            <input name="provider" value="opencode-zen" required>
-            <input name="apiKey" type="password" placeholder="API key" required>
-            <input name="priority" type="number" value="1" min="1" title="priority (1 = highest)">
-            <input name="cooldownPeriod" type="number" min="1000" placeholder="cooldown ms (optional)">
-            <button class="btn primary" type="submit">Add account</button>
-          </form>
+          <div class="connect-row">
+            <button class="btn primary" id="connectBtn">Connect OpenCode account</button>
+            <span class="hint">no JSON editing — get a link, sign in anywhere, paste the key</span>
+          </div>
         </div>
       </section>
+
+      <div class="modal-backdrop" id="connectModal" hidden>
+        <div class="modal">
+          <div class="modal-head"><h3>Connect OpenCode account</h3><button class="btn" id="connectClose">✕</button></div>
+          <ol class="steps">
+            <li>
+              <strong>Open this link</strong> in any browser or profile and sign in:
+              <div class="link-row">
+                <code id="connectLink">https://opencode.ai</code>
+                <button class="btn" id="copyLinkBtn">Copy link</button>
+                <a class="btn primary" id="openLinkBtn" href="https://opencode.ai" target="_blank" rel="noopener">Open</a>
+              </div>
+              <span class="hint">Create an API key in the OpenCode console, then come back here.</span>
+            </li>
+            <li>
+              <strong>Paste the API key</strong> — it's validated live before anything is saved:
+              <div class="form-row">
+                <input id="connectKey" type="password" placeholder="paste API key" autocomplete="off">
+                <input id="connectName" placeholder="display name (optional)">
+              </div>
+              <div id="connectMsg" class="hint"></div>
+            </li>
+          </ol>
+          <div class="modal-foot">
+            <button class="btn" id="connectCancel">Cancel</button>
+            <button class="btn primary" id="connectGo">Validate & connect</button>
+          </div>
+        </div>
+      </div>
 
       <section id="sec-proxies" class="sec">
         <div class="panel">
