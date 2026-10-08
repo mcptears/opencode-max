@@ -12,6 +12,9 @@ export interface Settings {
   requestTimeoutMs: number;
   /** Optional bearer token guarding mutating admin endpoints. Empty = open on loopback. */
   adminToken: string;
+  /** Periodic proxy health probing (skips dead proxies in rotation). */
+  proxyHealthCheck: boolean;
+  proxyHealthIntervalMs: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -19,6 +22,11 @@ const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json')
 const num = (v: unknown, fallback: number): number => {
   const n = typeof v === 'string' || typeof v === 'number' ? Number(v) : NaN;
   return Number.isFinite(n) && (n as number) >= 0 ? (n as number) : fallback;
+};
+
+const bool = (v: string | undefined, fallback: boolean): boolean => {
+  if (v === undefined) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(v.toLowerCase());
 };
 
 function fromEnv(): Settings {
@@ -31,6 +39,8 @@ function fromEnv(): Settings {
     defaultCooldownMs: num(process.env.DEFAULT_COOLDOWN_MS, 300000),
     requestTimeoutMs: num(process.env.REQUEST_TIMEOUT_MS, 120000),
     adminToken: process.env.ADMIN_TOKEN ?? '',
+    proxyHealthCheck: bool(process.env.PROXY_HEALTH_CHECK, true),
+    proxyHealthIntervalMs: num(process.env.PROXY_HEALTH_INTERVAL_MS, 60000),
   };
 }
 
@@ -48,6 +58,8 @@ let current: Settings = (() => {
         defaultCooldownMs: num(raw.defaultCooldownMs, base.defaultCooldownMs),
         requestTimeoutMs: num(raw.requestTimeoutMs, base.requestTimeoutMs),
         adminToken: typeof raw.adminToken === 'string' ? raw.adminToken : base.adminToken,
+        proxyHealthCheck: typeof raw.proxyHealthCheck === 'boolean' ? raw.proxyHealthCheck : base.proxyHealthCheck,
+        proxyHealthIntervalMs: num(raw.proxyHealthIntervalMs, base.proxyHealthIntervalMs),
       };
     }
   } catch {
@@ -76,6 +88,9 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     requestTimeoutMs:
       patch.requestTimeoutMs !== undefined ? num(patch.requestTimeoutMs, current.requestTimeoutMs) : current.requestTimeoutMs,
     adminToken: typeof patch.adminToken === 'string' ? patch.adminToken : current.adminToken,
+    proxyHealthCheck: typeof patch.proxyHealthCheck === 'boolean' ? patch.proxyHealthCheck : current.proxyHealthCheck,
+    proxyHealthIntervalMs:
+      patch.proxyHealthIntervalMs !== undefined ? num(patch.proxyHealthIntervalMs, current.proxyHealthIntervalMs) : current.proxyHealthIntervalMs,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
