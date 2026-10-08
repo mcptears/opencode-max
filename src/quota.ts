@@ -26,7 +26,7 @@ export class QuotaTracker {
     try {
       const row = getDb()
         .prepare('SELECT COUNT(*) AS c FROM usage_events WHERE account_id = ? AND ts >= ?')
-        .get(accountId, Date.now() - windowMs) as { c: number } | undefined;
+        .get(accountId, Date.now() - windowMs) as unknown as { c: number } | undefined;
       return row?.c ?? 0;
     } catch {
       return 0;
