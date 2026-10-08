@@ -60,7 +60,7 @@ function renderStatus(s) {
   const active = s.accounts.filter((a) => a.state === 'active').length;
   $('#statusPill').textContent = `● live · ${active}/${s.accounts.length} accounts`;
   $('#statusPill').className = 'pill on';
-  $('#egressLabel').textContent = s.ip.current || 'direct egress';
+  $('#egressLabel').textContent = s.ip.current || `direct egress · IPv${s.ip.family}`;
 
   const m = s.metrics;
   const cards = [
@@ -139,6 +139,7 @@ async function loadSettings() {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
+    if (f.egressFamily && settings.egressFamily) f.egressFamily.value = settings.egressFamily;
   } catch { /* ignore */ }
 }
 
@@ -169,6 +170,7 @@ $('#settingsForm').onsubmit = async (e) => {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
+  if (f.egressFamily && f.egressFamily.value) body.egressFamily = f.egressFamily.value;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
   const d = await r.json().catch(() => ({}));
