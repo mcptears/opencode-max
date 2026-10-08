@@ -198,15 +198,61 @@ async function loadSettings() {
 
 $('#btnRotate').onclick = async () => { await api('/v1/rotate', { method: 'POST' }); refresh(); };
 
-$('#accountForm').onsubmit = async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  const body = { id: f.id.value.trim(), name: f.name.value.trim(), provider: f.provider.value.trim(), apiKey: f.apiKey.value.trim(), priority: Number(f.priority.value) };
-  if (f.cooldownPeriod.value) body.cooldownPeriod = Number(f.cooldownPeriod.value);
-  const r = await jpost('/api/accounts', body);
-  if (r.ok) { f.reset(); f.provider.value = 'opencode-zen'; f.priority.value = '1'; }
-  else alert('Failed: ' + (await r.text()).slice(0, 200));
-  refresh();
+// ---- Connect-account modal: link -> sign in anywhere -> paste key -> validated & added ----
+const connectModal = $('#connectModal');
+function openConnect() {
+  $('#connectKey').value = '';
+  $('#connectName').value = '';
+  $('#connectMsg').textContent = '';
+  $('#connectGo').disabled = false;
+  $('#connectGo').textContent = 'Validate & connect';
+  connectModal.hidden = false;
+}
+function closeConnect() { connectModal.hidden = true; }
+$('#connectBtn').onclick = openConnect;
+$('#connectClose').onclick = closeConnect;
+$('#connectCancel').onclick = closeConnect;
+connectModal.addEventListener('click', (e) => { if (e.target === connectModal) closeConnect(); });
+$('#copyLinkBtn').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('#connectLink').textContent);
+    $('#copyLinkBtn').textContent = 'Copied!';
+    setTimeout(() => { $('#copyLinkBtn').textContent = 'Copy link'; }, 1500);
+  } catch { /* clipboard unavailable */ }
+};
+$('#connectGo').onclick = async () => {
+  const key = $('#connectKey').value.trim();
+  const msg = $('#connectMsg');
+  if (!key) { msg.textContent = 'Paste an API key first.'; return; }
+  $('#connectGo').disabled = true;
+  $('#connectGo').textContent = 'Validating…';
+  msg.textContent = 'Checking the key against upstream…';
+  try {
+    const v = await (await api('/api/accounts/validate', { method: 'POST', body: JSON.stringify({ apiKey: key }) })).json();
+    if (!v.ok) {
+      msg.textContent = '✕ ' + (v.error || 'invalid key');
+      $('#connectGo').disabled = false;
+      $('#connectGo').textContent = 'Validate & connect';
+      return;
+    }
+    msg.textContent = '✓ Key is good — adding to the pool…';
+    const list = await (await api('/api/accounts')).json();
+    const ids = new Set((list.accounts || []).map((a) => a.id));
+    let n = 1;
+    while (ids.has(`zen-${n}`)) n++;
+    const name = $('#connectName').value.trim() || `OpenCode ${n}`;
+    const r = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ id: `zen-${n}`, name, provider: 'opencode-zen', apiKey: key, priority: n }),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+    msg.textContent = `✓ Connected as ${name} — live in the pool.`;
+    setTimeout(() => { closeConnect(); refresh(); }, 900);
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err.message || err).slice(0, 160);
+    $('#connectGo').disabled = false;
+    $('#connectGo').textContent = 'Validate & connect';
+  }
 };
 
 $('#proxyForm').onsubmit = async (e) => {
