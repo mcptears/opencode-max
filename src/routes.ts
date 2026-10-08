@@ -6,6 +6,7 @@ import type { AccountPool } from './accountPool.js';
 import type { IpRotator } from './ipRotator.js';
 import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
+import type { QuotaTracker } from './quota.js';
 import { ZenClient } from './zenClient.js';
 
 function abortOnClientClose(req: express.Request): AbortSignal {
@@ -14,9 +15,9 @@ function abortOnClientClose(req: express.Request): AbortSignal {
   return controller.signal;
 }
 
-export function buildRouter(pool: AccountPool, rotator: IpRotator, sessions: SessionManager, metrics?: Metrics): Router {
+export function buildRouter(pool: AccountPool, rotator: IpRotator, sessions: SessionManager, metrics?: Metrics, quota?: QuotaTracker): Router {
   const router = Router();
-  const zen = new ZenClient(pool, rotator, sessions, metrics);
+  const zen = new ZenClient(pool, rotator, sessions, metrics, quota);
 
   router.get('/health', (_req, res) => {
     res.json({ ok: true, upstream: 'opencode-zen', ip: rotator.status(), accounts: pool.status().length });
