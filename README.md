@@ -77,6 +77,15 @@ boot. `GET /api/metrics/history?hours=24` returns hourly buckets, rendered as a
 traffic chart on the Overview page (amber dots mark hours with rate limits).
 30 days of history are retained.
 
+### Token saver
+
+Agentic loops routinely stuff tens of thousands of characters of diffs and logs
+into `tool_result` payloads. Before forwarding, oversized tool results are
+compressed: blank-line runs collapsed, repeated log lines deduped, and anything
+still over `TOKEN_SAVER_MAX_CHARS` (default 20000) middle-truncated keeping
+head + tail. Only tool-result content is ever touched. Estimated tokens saved
+(chars/4) accumulate on the Overview dashboard. Toggle with `TOKEN_SAVER=0`.
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
