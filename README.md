@@ -94,6 +94,18 @@ skipping / family rotation, header+payload sanitization, session ids, token
 saver compression, and quota counting. Tests use an isolated temp SQLite
 database via `OM_DATA_DIR`.
 
+### Docker
+
+```bash
+cp accounts.example.json accounts.json   # then fill in your keys
+cp proxies.example.json proxies.json     # optional
+docker compose up -d --build
+```
+
+The dashboard lands at http://localhost:8080/dashboard. Configs are mounted
+read-write so the dashboard can manage accounts/proxies; the SQLite database
+(quota usage + metrics history) lives in the `om-data` volume.
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
