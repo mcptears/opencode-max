@@ -88,12 +88,50 @@
       <section id="sec-proxies" class="sec">
         <div class="panel">
           <div class="panel-head"><h3>Egress proxies</h3><span class="hint" id="proxyHint"></span></div>
-          <ul class="plist" id="proxyList"></ul>
-          <h4 class="sub">Replace pool <span class="hint">— one <code>http://user:pass@host:port</code> per line, empty = direct</span></h4>
-          <form id="proxyForm" class="form-row">
-            <textarea name="proxies" rows="4"></textarea>
-            <div><button class="btn primary" type="submit">Save proxy pool</button></div>
-          </form>
+          <div class="tabs">
+            <button class="tab on" data-ptab="pool">Pool</button>
+            <button class="tab" data-ptab="add">Add</button>
+            <button class="tab" data-ptab="scraper">Scraper</button>
+          </div>
+
+          <div class="ptab" id="ptab-pool">
+            <ul class="plist" id="proxyList"></ul>
+            <h4 class="sub">Replace pool <span class="hint">— one <code>http://user:pass@host:port</code> per line, empty = direct</span></h4>
+            <form id="proxyForm" class="form-row">
+              <textarea name="proxies" rows="4"></textarea>
+              <div><button class="btn primary" type="submit">Save proxy pool</button></div>
+            </form>
+          </div>
+
+          <div class="ptab" id="ptab-add" hidden>
+            <p class="hint">Paste proxies below — each line is tested before it's added. Working ones join the pool, dead ones are listed and skipped.</p>
+            <form id="proxyAddForm" class="form-row">
+              <textarea name="proxies" rows="4" placeholder="http://user:pass@host:8080&#10;http://203.0.113.7:3128"></textarea>
+              <div><button class="btn primary" type="submit">Test & add</button></div>
+            </form>
+            <div id="addResult" class="hint"></div>
+          </div>
+
+          <div class="ptab" id="ptab-scraper" hidden>
+            <p class="hint">Scrapes free proxy lists from the providers below, tests each candidate, and adds the working ones to your pool. Free proxies are flaky — the health checker keeps weeding them out afterwards.</p>
+            <div class="scraper-head">
+              <button class="btn primary" id="scrapeBtn">Scrape now</button>
+              <span class="hint" id="scrapeStatus">idle</span>
+            </div>
+            <div id="scrapeResult"></div>
+            <h4 class="sub">Providers</h4>
+            <ul class="plist" id="providerList"></ul>
+            <h4 class="sub">Add provider</h4>
+            <form id="providerForm" class="form-grid">
+              <input name="name" placeholder="name · e.g. My list" required>
+              <input name="url" placeholder="https://… (text list or GeoNode JSON)" required style="grid-column:span 2">
+              <select name="format">
+                <option value="text">text (ip:port per line)</option>
+                <option value="geonode">GeoNode JSON</option>
+              </select>
+              <button class="btn primary" type="submit">Add provider</button>
+            </form>
+          </div>
         </div>
       </section>
 
