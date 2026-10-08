@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+.git/
+.gitignore
+*.log
+.DS_Store
+accounts.json
+proxies.json
+settings.json
+.env
+coverage/
