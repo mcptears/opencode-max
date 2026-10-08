@@ -43,6 +43,7 @@ function httpError(status: number, message: string): Error & { status: number } 
 }
 
 import type { QuotaTracker } from './quota.js';
+import { compressToolResults } from './tokenSaver.js';
 
 /**
  * Forwards requests to OpenCode Zen with the combined rotation strategy:
@@ -97,7 +98,13 @@ export class ZenClient {
       let body: string | undefined;
       if (req.bodyText && req.method !== 'GET' && req.method !== 'HEAD') {
         try {
-          body = JSON.stringify(sanitizePayload(JSON.parse(req.bodyText), this.sessions.id));
+          const parsed = sanitizePayload(JSON.parse(req.bodyText), this.sessions.id);
+          const s = getSettings();
+          if (s.tokenSaver) {
+            const savedChars = compressToolResults(parsed, s.tokenSaverMaxChars);
+            if (savedChars > 0) this.metrics?.addTokensSaved(Math.round(savedChars / 4));
+          }
+          body = JSON.stringify(parsed);
           headers['content-type'] = 'application/json';
         } catch {
           body = req.bodyText; // non-JSON bodies pass through untouched
