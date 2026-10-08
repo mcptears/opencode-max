@@ -88,11 +88,20 @@ head + tail. Only tool-result content is ever touched. Estimated tokens saved
 
 ### Tests
 
-`npm test` runs the vitest suite (28 tests): account pool priority /
+`npm test` runs the vitest suite (30 tests): account pool priority /
 cooldown / invalid-key / quota steering, IP rotator round-robin / health
 skipping / family rotation, header+payload sanitization, session ids, token
-saver compression, and quota counting. Tests use an isolated temp SQLite
-database via `OM_DATA_DIR`.
+saver compression, quota counting, and config loading. Tests use an isolated
+temp SQLite database via `OM_DATA_DIR`.
+
+### Connect flow (no JSON editing)
+
+The dashboard's **Connect OpenCode account** button opens a guided modal:
+copy the opencode.ai link, open it in any browser or profile, create an API
+key, paste it back — the key is validated live against upstream (a minimal
+1-token ping; bad keys are rejected before anything is saved) and added to
+the pool with an auto id. The server also boots with an empty account pool,
+so connecting from the dashboard is the first-run onboarding path.
 
 ### Docker
 
