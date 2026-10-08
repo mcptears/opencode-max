@@ -262,6 +262,108 @@ $('#proxyForm').onsubmit = async (e) => {
   loadProxies(); refresh();
 };
 
+// ---- proxy tabs ----
+document.querySelectorAll('[data-ptab]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('[data-ptab]').forEach((b) => b.classList.toggle('on', b === btn));
+    document.querySelectorAll('.ptab').forEach((p) => { p.hidden = p.id !== 'ptab-' + btn.dataset.ptab; });
+    if (btn.dataset.ptab === 'scraper') loadProviders();
+  };
+});
+
+// ---- Add tab: test each line, add only the working ones ----
+$('#proxyAddForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const lines = e.target.proxies.value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const box = $('#addResult');
+  if (!lines.length) { box.textContent = 'Paste at least one proxy.'; return; }
+  box.textContent = `Testing ${lines.length}…`;
+  try {
+    const { results } = await (await api('/api/proxies/test', { method: 'POST', body: JSON.stringify({ proxies: lines }) })).json();
+    const ok = results.filter((r) => r.ok).map((r) => r.proxy);
+    const bad = results.filter((r) => !r.ok).map((r) => r.proxy);
+    if (ok.length) {
+      const cur = new Set(window._proxies || []);
+      ok.forEach((p) => cur.add(p));
+      await jpost('/api/proxies', { proxies: [...cur] });
+    }
+    box.innerHTML = `${ok.length} working added ✓` + (bad.length ? `<br>${bad.length} failed: ${bad.map(esc).join(', ')}` : '');
+    e.target.reset();
+    loadProxies(); refresh();
+  } catch {
+    box.textContent = 'Test failed — try again.';
+  }
+};
+
+// ---- Scraper tab ----
+async function loadProviders() {
+  try {
+    const { providers } = await (await api('/api/scraper/providers')).json();
+    $('#providerList').innerHTML = providers.map((p) => `
+      <li>
+        <span><strong>${esc(p.name)}</strong> <span class="hint">${esc(p.url.slice(0, 60))}${p.url.length > 60 ? '…' : ''}</span>
+        <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></span>
+        <span>
+          <button class="btn" data-ptoggle="${p.id}">${p.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn danger" data-pdel="${p.id}">Remove</button>
+        </span>
+      </li>`).join('') || '<li class="hint">no providers</li>';
+    $('#providerList').querySelectorAll('[data-ptoggle]').forEach((b) => b.onclick = async () => {
+      const cur = providers.find((x) => x.id === b.dataset.ptoggle);
+      await api('/api/scraper/providers/' + b.dataset.ptoggle, { method: 'PUT', body: JSON.stringify({ enabled: !cur.enabled }) });
+      loadProviders();
+    });
+    $('#providerList').querySelectorAll('[data-pdel]').forEach((b) => b.onclick = async () => {
+      if (!confirm('Remove this provider?')) return;
+      await api('/api/scraper/providers/' + b.dataset.pdel, { method: 'DELETE' });
+      loadProviders();
+    });
+  } catch { /* ignore */ }
+}
+
+$('#providerForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const r = await api('/api/scraper/providers', {
+    method: 'POST',
+    body: JSON.stringify({ name: f.name.value.trim(), url: f.url.value.trim(), format: f.format.value }),
+  });
+  if (r.ok) { f.reset(); loadProviders(); }
+  else alert('Failed: ' + (await r.text()).slice(0, 200));
+};
+
+let scrapeTimer = null;
+$('#scrapeBtn').onclick = async () => {
+  const r = await api('/api/scraper/run', { method: 'POST' });
+  if (!r.ok) { $('#scrapeStatus').textContent = 'already running'; return; }
+  $('#scrapeBtn').disabled = true;
+  $('#scrapeStatus').textContent = 'scraping…';
+  $('#scrapeResult').innerHTML = '';
+  clearInterval(scrapeTimer);
+  scrapeTimer = setInterval(async () => {
+    try {
+      const s = await (await api('/api/scraper/status')).json();
+      if (s.running) return;
+      clearInterval(scrapeTimer);
+      $('#scrapeBtn').disabled = false;
+      const res = s.result;
+      if (!res) { $('#scrapeStatus').textContent = 'failed'; return; }
+      const secs = ((res.finishedAt - res.startedAt) / 1000).toFixed(1);
+      $('#scrapeStatus').textContent = `done in ${secs}s`;
+      $('#scrapeResult').innerHTML = `
+        <div class="cards">
+          <div class="card"><div class="k">Found</div><div class="v">${res.found}</div></div>
+          <div class="card"><div class="k">Tested</div><div class="v">${res.tested}</div></div>
+          <div class="card"><div class="k">Working</div><div class="v">${res.working.length}</div></div>
+        </div>
+        <ul class="plist">` + res.providers.map((p) => `
+          <li><span>${esc(p.name)} ${p.ok ? `<span class="tag ok">${p.found} found</span>` : `<span class="tag bad">failed</span>`}</span>
+          ${p.error ? `<span class="hint">${esc(p.error)}</span>` : ''}</li>`).join('') + `</ul>`;
+      loadProxies(); refresh();
+    } catch { /* keep polling */ }
+  }, 3000);
+};
+
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
