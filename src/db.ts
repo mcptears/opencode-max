@@ -12,7 +12,8 @@ let db: DatabaseSync | null = null;
 
 export function getDb(): DatabaseSync {
   if (db) return db;
-  const dir = path.join(projectRoot(), 'data');
+  // OM_DATA_DIR lets tests (and custom deployments) relocate the database.
+  const dir = process.env.OM_DATA_DIR ?? path.join(projectRoot(), 'data');
   fs.mkdirSync(dir, { recursive: true });
   db = new DatabaseSync(path.join(dir, 'opencode-max.db'));
   db.exec('PRAGMA journal_mode = WAL;');
