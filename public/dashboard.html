@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>opencode-max dashboard</title>
+<link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">⚡</span><h1>opencode-max</h1></div>
+  <div class="top-actions">
+    <span id="statusPill" class="pill">…</span>
+    <button id="btnRotate" class="btn primary">🔄 Rotate IP</button>
+  </div>
+</header>
+
+<main>
+  <section class="cards" id="statCards"></section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Accounts</h2><span class="hint">keys are never shown</span></div>
+    <table class="tbl" id="accountsTbl">
+      <thead><tr><th>ID</th><th>Name</th><th>Provider</th><th>Priority</th><th>State</th><th>Cooldown</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <form id="accountForm" class="form-grid">
+      <input name="id" placeholder="id (e.g. zen-p1)" required>
+      <input name="name" placeholder="name">
+      <input name="provider" placeholder="provider" value="opencode-zen" required>
+      <input name="apiKey" placeholder="API key" type="password" required>
+      <input name="priority" placeholder="priority" type="number" value="1" min="1" required>
+      <input name="cooldownPeriod" placeholder="cooldown ms (optional)" type="number" min="1000">
+      <button class="btn primary" type="submit">Add account</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Egress proxies</h2><span class="hint" id="proxyHint"></span></div>
+    <ul class="plist" id="proxyList"></ul>
+    <form id="proxyForm" class="form-row">
+      <textarea name="proxies" rows="3" placeholder="One proxy per line, e.g. http://user:pass@host:8080"></textarea>
+      <button class="btn primary" type="submit">Save proxy pool</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Settings</h2><span class="hint">applied live · port needs restart</span></div>
+    <form id="settingsForm" class="form-grid">
+      <label>Upstream base<input name="upstreamBase"></label>
+      <label>Max retries<input name="maxRetries" type="number" min="0"></label>
+      <label>Retry base ms<input name="retryBaseMs" type="number" min="100"></label>
+      <label>Retry max ms<input name="retryMaxMs" type="number" min="1000"></label>
+      <label>Default cooldown ms<input name="defaultCooldownMs" type="number" min="1000"></label>
+      <label>Request timeout ms<input name="requestTimeoutMs" type="number" min="1000"></label>
+      <label>Port<input name="port" type="number" min="1" max="65535"></label>
+      <label>Admin token<input name="adminToken" type="password" placeholder="(empty = open on localhost)"></label>
+      <button class="btn primary" type="submit">Save settings</button>
+    </form>
+    <div id="settingsMsg" class="msg"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Events</h2></div>
+    <ul class="events" id="eventsList"></ul>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Connect OpenCode</h2></div>
+    <pre class="code" id="opencodeSnippet"></pre>
+    <button class="btn" id="btnCopy">Copy snippet</button>
+  </section>
+</main>
+
+<footer>opencode-max · educational / resilience-testing tool — respect provider ToS</footer>
+<script src="/dashboard/app.js"></script>
+</body>
+</html>
