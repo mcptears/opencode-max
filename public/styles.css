@@ -69,6 +69,7 @@ code{background:#0b0e20;border:1px solid var(--line);border-radius:6px;padding:1
 .badge{display:inline-block;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:650}
 .badge.active{background:rgba(52,217,123,.14);color:var(--ok);border:1px solid rgba(52,217,123,.35)}
 .badge.cooling_down{background:rgba(255,176,46,.14);color:var(--warn);border:1px solid rgba(255,176,46,.35)}
+.badge.invalid{background:rgba(255,93,108,.14);color:var(--bad);border:1px solid rgba(255,93,108,.4)}
 
 /* ---------- forms ---------- */
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px}
