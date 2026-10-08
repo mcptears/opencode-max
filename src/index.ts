@@ -1,3 +1,4 @@
+import dns from 'node:dns/promises';
 import { exec } from 'node:child_process';
 import path from 'node:path';
 import express from 'express';
@@ -77,6 +78,18 @@ async function main(): Promise<void> {
     rotator.startHealthChecks(settings.proxyHealthIntervalMs);
   }
 
+  // Zen treats IPv4 and IPv6 as separate rate-limit buckets: detect dual-stack
+  // so direct egress can alternate families and double the effective quota.
+  let dualStack = false;
+  try {
+    const host = new URL(settings.upstreamBase).hostname;
+    await dns.lookup(host, { family: 6 });
+    dualStack = true;
+  } catch {
+    dualStack = false;
+  }
+  rotator.configureEgress({ familyMode: settings.egressFamily, dualStack });
+
   const app = express();
   app.disable('x-powered-by');
   app.use(express.raw({ type: () => true, limit: '25mb' }));
@@ -123,9 +136,10 @@ async function main(): Promise<void> {
         port,
         onOpenDashboard: () => openBrowser(`http://127.0.0.1:${port}/dashboard`),
         onRotate: () => {
-          const cur = rotator.rotate();
-          metrics.rotated(cur);
-          console.log(`rotated egress → ${cur ?? 'direct'}`);
+          rotator.rotate();
+          const label = rotator.egressLabel();
+          metrics.rotated(label);
+          console.log(`rotated egress → ${label}`);
         },
         onQuit: () => {
           tray?.kill();
