@@ -22,8 +22,23 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "tray": "node dist/index.js --tray"
+    "tray": "node dist/index.js --tray",
+    "prepare": "npm run build"
   },
   "type": "module",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "bin": {
+    "opencode-max": "./bin/opencode-max.cjs"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "public/",
+    "tray/",
+    "scripts/",
+    "accounts.example.json",
+    "proxies.example.json",
+    "README.md",
+    "ecosystem.config.cjs"
+  ]
 }
