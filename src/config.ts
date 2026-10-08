@@ -51,8 +51,11 @@ export function loadAccounts(filePath: string): AccountConfig[] {
   }
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
   const list = (Array.isArray(raw) ? raw : (raw as { accounts?: unknown }).accounts) as AccountConfig[];
-  if (!Array.isArray(list) || list.length === 0) {
-    throw new Error(`accounts file must contain a non-empty array: ${filePath}`);
+  if (!Array.isArray(list)) {
+    throw new Error(`accounts file must contain an array: ${filePath}`);
+  }
+  if (list.length === 0) {
+    console.warn('warning: account pool is empty — connect accounts from the dashboard to start proxying');
   }
   for (const a of list) {
     if (!a || typeof a.id !== 'string' || typeof a.apiKey !== 'string' ||
