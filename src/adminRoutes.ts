@@ -90,6 +90,12 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ metrics: metrics.summary(), events: metrics.recentEvents(50) });
   });
 
+  /** Hourly traffic history for the dashboard chart. */
+  router.get('/api/metrics/history', (req, res) => {
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    res.json({ hours, buckets: metrics.history(hours) });
+  });
+
   // ---- accounts ----
   router.get('/api/accounts', (_req, res) => {
     // Never leak keys: return status view only.
