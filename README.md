@@ -3,13 +3,6 @@
 A unified proxy wrapper for **OpenCode Zen** that combines **IP rotation** with
 **multi-account API key management** in a single Node.js/TypeScript + Express server.
 
-Inspired by the architecture of two community projects:
-
-- [rahadiana/opencode-multi-account](https://github.com/rahadiana/opencode-multi-account) —
-  priority-ordered token pools with cooldown reactivation.
-- [alztrk/opencode-ip-rotator](https://github.com/alztrk/opencode-ip-rotator) —
-  round-robin outbound proxy pools and manual `/api/rotate`.
-
 ## How it works
 
 ```
