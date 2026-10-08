@@ -1,4 +1,5 @@
 import type { AccountConfig } from './config.js';
+import { getSettings } from './settings.js';
 
 export interface AccountStatus {
   id: string;
@@ -16,13 +17,20 @@ export interface AccountStatus {
  * it automatically rejoins the pool.
  */
 export class AccountPool {
-  private readonly accounts: AccountConfig[];
+  private accounts: AccountConfig[];
   private readonly coolingUntil = new Map<string, number>();
-  private readonly defaultCooldownMs: number;
 
-  constructor(accounts: AccountConfig[], defaultCooldownMs: number) {
-    this.accounts = accounts;
-    this.defaultCooldownMs = defaultCooldownMs;
+  constructor(accounts: AccountConfig[]) {
+    this.accounts = [...accounts].sort((a, b) => a.priority - b.priority);
+  }
+
+  /** Hot-swap the pool (dashboard edits). Cooling state is preserved by account id. */
+  replace(accounts: AccountConfig[]): void {
+    const known = new Set(accounts.map((a) => a.id));
+    for (const id of [...this.coolingUntil.keys()]) {
+      if (!known.has(id)) this.coolingUntil.delete(id);
+    }
+    this.accounts = [...accounts].sort((a, b) => a.priority - b.priority);
   }
 
   /** Highest-priority account for the provider that is not cooling down. */
@@ -38,7 +46,7 @@ export class AccountPool {
   /** Park an account after a 429/quota hit. */
   markLimited(id: string, cooldownMs?: number): void {
     const acc = this.accounts.find((a) => a.id === id);
-    this.coolingUntil.set(id, Date.now() + (cooldownMs ?? acc?.cooldownPeriod ?? this.defaultCooldownMs));
+    this.coolingUntil.set(id, Date.now() + (cooldownMs ?? acc?.cooldownPeriod ?? getSettings().defaultCooldownMs));
   }
 
   exhausted(provider?: string): boolean {
