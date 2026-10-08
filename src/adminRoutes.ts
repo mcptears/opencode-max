@@ -7,6 +7,7 @@ import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath } from './settings.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
+import { loadProviders, saveProviders, scrapeAll, testProxy, type ProviderFormat, type ScrapeResult } from './scraper.js';
 
 export interface AdminContext {
   pool: AccountPool;
@@ -251,6 +252,117 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     rotator.rotate();
     metrics.rotated(rotator.egressLabel());
     res.json({ ok: true, ...rotator.status() });
+  });
+
+  /** Test a list of proxies without adding them. */
+  router.post('/api/proxies/test', async (req, res) => {
+    const body = jsonBody(req) as { proxies?: unknown };
+    const list = Array.isArray(body.proxies) ? body.proxies.filter((p): p is string => typeof p === 'string') : [];
+    const results = await Promise.all(
+      list.slice(0, 50).map(async (proxy) => ({ proxy, ok: await testProxy(proxy) })),
+    );
+    res.json({ results });
+  });
+
+  // ---- proxy scraper ----
+  let scrapeJob: { running: boolean; result: ScrapeResult | null } = { running: false, result: null };
+
+  router.get('/api/scraper/providers', (_req, res) => {
+    res.json({ providers: loadProviders() });
+  });
+
+  router.post('/api/scraper/providers', (req, res) => {
+    const body = jsonBody(req) as { name?: unknown; url?: unknown; format?: unknown };
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    const format: ProviderFormat = body.format === 'geonode' ? 'geonode' : 'text';
+    if (!name || !url) {
+      res.status(400).json({ error: { message: 'name and url are required', status: 400 } });
+      return;
+    }
+    try {
+      new URL(url);
+    } catch {
+      res.status(400).json({ error: { message: 'url is not valid', status: 400 } });
+      return;
+    }
+    const providers = loadProviders();
+    const id = `custom-${Date.now().toString(36)}`;
+    providers.push({ id, name, url, format, enabled: true });
+    saveProviders(providers);
+    metrics.record('proxy_added', `scraper provider '${name}' added`);
+    res.status(201).json({ ok: true, id });
+  });
+
+  router.put('/api/scraper/providers/:id', (req, res) => {
+    const body = jsonBody(req) as { name?: unknown; url?: unknown; format?: unknown; enabled?: unknown };
+    const providers = loadProviders();
+    const p = providers.find((x) => x.id === req.params.id);
+    if (!p) {
+      res.status(404).json({ error: { message: 'provider not found', status: 404 } });
+      return;
+    }
+    if (typeof body.name === 'string' && body.name.trim()) p.name = body.name.trim();
+    if (typeof body.url === 'string' && body.url.trim()) {
+      try {
+        new URL(body.url.trim());
+      } catch {
+        res.status(400).json({ error: { message: 'url is not valid', status: 400 } });
+        return;
+      }
+      p.url = body.url.trim();
+    }
+    if (body.format === 'text' || body.format === 'geonode') p.format = body.format;
+    if (typeof body.enabled === 'boolean') p.enabled = body.enabled;
+    saveProviders(providers);
+    res.json({ ok: true });
+  });
+
+  router.delete('/api/scraper/providers/:id', (req, res) => {
+    const providers = loadProviders();
+    const next = providers.filter((x) => x.id !== req.params.id);
+    if (next.length === providers.length) {
+      res.status(404).json({ error: { message: 'provider not found', status: 404 } });
+      return;
+    }
+    saveProviders(next);
+    metrics.record('proxy_removed', `scraper provider '${req.params.id}' removed`);
+    res.json({ ok: true });
+  });
+
+  router.get('/api/scraper/status', (_req, res) => {
+    res.json({ running: scrapeJob.running, result: scrapeJob.result });
+  });
+
+  router.post('/api/scraper/run', (_req, res) => {
+    if (scrapeJob.running) {
+      res.status(409).json({ error: { message: 'a scrape is already running', status: 409 } });
+      return;
+    }
+    scrapeJob = { running: true, result: null };
+    metrics.record('settings', 'proxy scrape started');
+    void (async () => {
+      try {
+        const result = await scrapeAll(loadProviders());
+        const current = readProxies();
+        const known = new Set(current);
+        const fresh = result.working.filter((p) => !known.has(p));
+        if (fresh.length > 0) {
+          const next = [...current, ...fresh];
+          writeProxies(next);
+          rotator.setProxies(next);
+        }
+        scrapeJob = { running: false, result };
+        metrics.record(
+          'proxy_added',
+          `proxy scrape finished: ${result.working.length} working of ${result.tested} tested (${fresh.length} new)`,
+        );
+      } catch (e) {
+        scrapeJob = { running: false, result: null };
+        metrics.record('error', `proxy scrape failed: ${String(e).slice(0, 120)}`);
+      }
+    })();
+    res.status(202).json({ ok: true, started: true });
   });
 
   // ---- settings ----
