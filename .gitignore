@@ -7,3 +7,4 @@ proxies.json
 .DS_Store
 settings.json
 data/
+proxy-providers.json
