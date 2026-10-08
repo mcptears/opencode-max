@@ -38,6 +38,11 @@ On **429 / quota / transient 5xx** from upstream:
 4. The request is retried transparently with exponential backoff + jitter
    (configurable via `MAX_RETRIES`, `RETRY_BASE_MS`, `RETRY_MAX_MS`).
 
+**Dead-key detection:** a `401`, or a `403` whose body looks like an invalid key
+(rather than quota), parks the key immediately as `invalid` — no pointless
+retries or IP rotations. It stays out of rotation until you fix it and hit
+**Reset** in the dashboard (`POST /api/accounts/:id/reset`).
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
