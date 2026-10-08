@@ -1,0 +1,21 @@
+services:
+  opencode-max:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      # Your real configs (copy from the .example files first). Mounted
+      # read-write so the dashboard can add/remove accounts and proxies.
+      - ./accounts.json:/app/accounts.json
+      - ./proxies.json:/app/proxies.json
+      # SQLite database (quota usage, metrics history).
+      - om-data:/app/data
+    environment:
+      - PORT=8080
+      # - PROXY_LIST=http://user:pass@proxy1:8080,http://proxy2:8080
+      # - QUOTA_5H_LIMIT=200
+      # - EGRESS_FAMILY=auto
+    restart: unless-stopped
+
+volumes:
+  om-data:
