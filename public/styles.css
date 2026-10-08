@@ -130,3 +130,12 @@ footer{text-align:center;color:var(--dim);font-size:12px;padding:20px}
 a.btn{text-decoration:none;display:inline-block}
 .modal-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 #connectMsg{min-height:20px;margin-top:8px}
+
+/* ---------- proxy tabs & scraper ---------- */
+.tabs{display:flex;gap:8px;margin:4px 0 16px}
+.tab{border:1px solid var(--line2);background:transparent;color:var(--mut);border-radius:10px;padding:8px 18px;font-size:13.5px;font-weight:600;cursor:pointer}
+.tab.on{background:linear-gradient(135deg,#7c5cff,#5a3ee6);color:#fff;border:none}
+.ptab[hidden]{display:none}
+.scraper-head{display:flex;align-items:center;gap:14px;margin:6px 0 14px}
+#providerList li{display:flex;justify-content:space-between;align-items:center;gap:10px}
+#providerList li>span:last-child{display:flex;gap:8px}
