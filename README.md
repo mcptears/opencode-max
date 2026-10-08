@@ -51,6 +51,14 @@ fails twice in a row is marked **down** and skipped by rotation until it
 recovers; transitions are logged as events. Toggle with `PROXY_HEALTH_CHECK=0`
 or the dashboard settings checkbox. Credentials are redacted in all status output.
 
+### IPv4/IPv6 family rotation
+
+Zen treats IPv4 and IPv6 as **separate** rate-limit buckets. With no proxies
+configured (direct egress), `opencode-max` detects dual-stack at startup and
+alternates the connection family on every rotation in `auto` mode — effectively
+doubling the quota. Pin with `EGRESS_FAMILY=4|6|auto` (or the dashboard settings
+dropdown).
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
