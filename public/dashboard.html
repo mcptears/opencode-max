@@ -83,6 +83,13 @@
             <label>Admin token<input name="adminToken" type="password" placeholder="empty = open on localhost"></label>
             <label>Proxy health interval (ms)<input name="proxyHealthIntervalMs" type="number" min="10000"></label>
             <label class="check"><input name="proxyHealthCheck" type="checkbox"> Probe proxies & skip dead ones</label>
+            <label>Direct egress IP family
+              <select name="egressFamily">
+                <option value="auto">auto (alternate v4/v6 on dual-stack)</option>
+                <option value="4">IPv4 only</option>
+                <option value="6">IPv6 only</option>
+              </select>
+            </label>
             <button class="btn primary" type="submit">Save settings</button>
           </form>
           <div id="settingsMsg" class="msg"></div>
