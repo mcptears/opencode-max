@@ -275,7 +275,10 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     const body = jsonBody(req) as { name?: unknown; url?: unknown; format?: unknown };
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const url = typeof body.url === 'string' ? body.url.trim() : '';
-    const format: ProviderFormat = body.format === 'geonode' || body.format === 'spys' ? body.format : 'text';
+    const format: ProviderFormat =
+      body.format === 'geonode' || body.format === 'spys' || body.format === 'fpl' || body.format === 'proxynova'
+        ? body.format
+        : 'text';
     if (!name || !url) {
       res.status(400).json({ error: { message: 'name and url are required', status: 400 } });
       return;
@@ -312,7 +315,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       }
       p.url = body.url.trim();
     }
-    if (body.format === 'text' || body.format === 'geonode' || body.format === 'spys') p.format = body.format;
+    if (['text', 'geonode', 'spys', 'fpl', 'proxynova'].includes(body.format as string)) p.format = body.format as ProviderFormat;
     if (typeof body.enabled === 'boolean') p.enabled = body.enabled;
     saveProviders(providers);
     res.json({ ok: true });
