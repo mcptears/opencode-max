@@ -75,8 +75,8 @@ code{background:#0b0e20;border:1px solid var(--line);border-radius:6px;padding:1
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px}
 .form-row{display:grid;gap:12px;margin-top:14px}
 label{font-size:12.5px;color:var(--mut);display:grid;gap:6px;font-weight:550}
-input,textarea{background:#0d1128;border:1px solid var(--line);color:var(--txt);border-radius:11px;padding:11px 13px;font-size:14px;width:100%;transition:border-color .15s,box-shadow .15s}
-input:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(124,92,255,.18)}
+input,textarea,select{background:#0d1128;border:1px solid var(--line);color:var(--txt);border-radius:11px;padding:11px 13px;font-size:14px;width:100%;transition:border-color .15s,box-shadow .15s}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(124,92,255,.18)}
 input::placeholder,textarea::placeholder{color:var(--dim)}
 textarea{font-family:ui-monospace,monospace;font-size:13px;resize:vertical}
 .btn{border:1px solid var(--line2);background:#20265a;color:var(--txt);border-radius:11px;padding:10px 18px;font-size:14px;font-weight:550;cursor:pointer;transition:all .15s}
