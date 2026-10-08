@@ -86,6 +86,14 @@ still over `TOKEN_SAVER_MAX_CHARS` (default 20000) middle-truncated keeping
 head + tail. Only tool-result content is ever touched. Estimated tokens saved
 (chars/4) accumulate on the Overview dashboard. Toggle with `TOKEN_SAVER=0`.
 
+### Tests
+
+`npm test` runs the vitest suite (28 tests): account pool priority /
+cooldown / invalid-key / quota steering, IP rotator round-robin / health
+skipping / family rotation, header+payload sanitization, session ids, token
+saver compression, and quota counting. Tests use an isolated temp SQLite
+database via `OM_DATA_DIR`.
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
