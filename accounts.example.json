@@ -1,0 +1,1 @@
+{"accounts":[{"apiKey":"YOUR_OPENCODE_ZEN_API_KEY","cooldownPeriod":300000,"id":"zen-p1","name":"Zen Primary","priority":1,"provider":"opencode-zen"},{"apiKey":"YOUR_SECOND_KEY","cooldownPeriod":300000,"id":"zen-p2","name":"Zen Secondary","priority":2,"provider":"opencode-zen"}]}
