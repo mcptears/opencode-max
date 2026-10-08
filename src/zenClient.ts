@@ -42,6 +42,8 @@ function httpError(status: number, message: string): Error & { status: number } 
   return Object.assign(new Error(message), { status });
 }
 
+import type { QuotaTracker } from './quota.js';
+
 /**
  * Forwards requests to OpenCode Zen with the combined rotation strategy:
  * attach a pool token -> strip identity/telemetry -> on 429 park the token,
@@ -53,6 +55,7 @@ export class ZenClient {
     private readonly rotator: IpRotator,
     private readonly sessions: SessionManager,
     private readonly metrics?: Metrics,
+    private readonly quota?: QuotaTracker,
   ) {}
 
   async forward(req: ForwardRequest): Promise<ForwardResult> {
@@ -111,6 +114,9 @@ export class ZenClient {
         await sleep(backoff(attempt));
         continue;
       }
+
+      // Count the attempt against the account's quota: it reached upstream.
+      this.quota?.record(account.id);
 
       if (!RETRYABLE_STATUS.has(upstream.status)) {
         // Dead-key detection: 401, or a 403 that smells like a bad key (not quota).
