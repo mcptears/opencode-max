@@ -178,8 +178,8 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   });
 
   router.post('/api/rotate', (_req, res) => {
-    const current = rotator.rotate();
-    metrics.rotated(current);
+    rotator.rotate();
+    metrics.rotated(rotator.egressLabel());
     res.json({ ok: true, ...rotator.status() });
   });
 
@@ -201,13 +201,17 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     }
     if (typeof body.proxyHealthCheck === 'boolean') patch.proxyHealthCheck = body.proxyHealthCheck;
     if (body.proxyHealthIntervalMs !== undefined) patch.proxyHealthIntervalMs = body.proxyHealthIntervalMs;
+    if (body.egressFamily === 'auto' || body.egressFamily === '4' || body.egressFamily === '6') {
+      patch.egressFamily = body.egressFamily;
+    }
     // Port changes are saved but only take effect after a restart.
     const portChanged = body.port !== undefined && Number(body.port) !== getSettings().port;
     if (body.port !== undefined) patch.port = body.port;
     const next = saveSettings(patch as Parameters<typeof saveSettings>[0]);
-    // Apply health-check toggling live.
+    // Apply health-check toggling and egress family live.
     rotator.stopHealthChecks();
     if (next.proxyHealthCheck) rotator.startHealthChecks(next.proxyHealthIntervalMs);
+    rotator.configureEgress({ familyMode: next.egressFamily });
     metrics.record('settings', 'settings updated via dashboard');
     res.json({ ok: true, restartRequired: portChanged, settings: { ...next, adminToken: next.adminToken ? '••••••••' : '' } });
   });
