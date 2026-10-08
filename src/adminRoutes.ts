@@ -208,6 +208,8 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     }
     if (typeof body.proxyHealthCheck === 'boolean') patch.proxyHealthCheck = body.proxyHealthCheck;
     if (body.proxyHealthIntervalMs !== undefined) patch.proxyHealthIntervalMs = body.proxyHealthIntervalMs;
+    if (typeof body.tokenSaver === 'boolean') patch.tokenSaver = body.tokenSaver;
+    if (body.tokenSaverMaxChars !== undefined) patch.tokenSaverMaxChars = body.tokenSaverMaxChars;
     if (body.egressFamily === 'auto' || body.egressFamily === '4' || body.egressFamily === '6') {
       patch.egressFamily = body.egressFamily;
     }
