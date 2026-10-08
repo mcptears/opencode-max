@@ -114,9 +114,10 @@ function renderStatus(s) {
   $('#egressLabel').textContent = s.ip.current || `direct egress · IPv${s.ip.family}`;
 
   const m = s.metrics;
+  const fmtTokens = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0);
   const cards = [
     ['Requests', m.requests], ['Succeeded', m.successes], ['Rate limited', m.rateLimited],
-    ['IP rotations', m.rotations], ['Retries', m.retries],
+    ['IP rotations', m.rotations], ['Retries', m.retries], ['Tokens saved', fmtTokens(m.tokensSaved)],
     ['Uptime', `${Math.floor(m.uptimeSec / 60)}<small> min</small>`],
   ];
   $('#statCards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
@@ -186,11 +187,12 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
     if (f.egressFamily && settings.egressFamily) f.egressFamily.value = settings.egressFamily;
+    if (f.tokenSaver) f.tokenSaver.checked = settings.tokenSaver !== false;
   } catch { /* ignore */ }
 }
 
@@ -217,10 +219,11 @@ $('#proxyForm').onsubmit = async (e) => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
+  body.tokenSaver = !!f.tokenSaver.checked;
   if (f.egressFamily && f.egressFamily.value) body.egressFamily = f.egressFamily.value;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
