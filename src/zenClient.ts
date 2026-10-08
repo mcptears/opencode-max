@@ -1,8 +1,9 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { AccountPool } from './accountPool.js';
-import { CONFIG } from './config.js';
 import type { IpRotator } from './ipRotator.js';
+import type { Metrics } from './metrics.js';
 import { sanitizeHeaders, sanitizePayload } from './sanitizer.js';
+import { getSettings } from './settings.js';
 import type { SessionManager } from './sessionManager.js';
 
 export interface ForwardRequest {
@@ -28,7 +29,8 @@ export interface ForwardResult {
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function backoff(attempt: number): number {
-  const exp = Math.min(CONFIG.retryMaxMs, CONFIG.retryBaseMs * 2 ** attempt);
+  const s = getSettings();
+  const exp = Math.min(s.retryMaxMs, s.retryBaseMs * 2 ** attempt);
   return Math.floor(exp * (0.8 + Math.random() * 0.4)); // ±20% jitter
 }
 
@@ -46,19 +48,22 @@ export class ZenClient {
     private readonly pool: AccountPool,
     private readonly rotator: IpRotator,
     private readonly sessions: SessionManager,
+    private readonly metrics?: Metrics,
   ) {}
 
   async forward(req: ForwardRequest): Promise<ForwardResult> {
     let lastError: unknown = null;
+    const maxRetries = getSettings().maxRetries;
 
-    for (let attempt = 0; attempt <= CONFIG.maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const account = this.pool.acquire(req.provider);
       if (!account) {
         throw httpError(503, 'all accounts exhausted (rate-limited or none configured)');
       }
+      this.metrics?.hit(account.id);
 
       const proxy = this.rotator.current();
-      const base = (account.baseUrl ?? CONFIG.upstreamBase).replace(/\/+$/, '');
+      const base = (account.baseUrl ?? getSettings().upstreamBase).replace(/\/+$/, '');
       const url = `${base}${req.path}${req.query}`;
 
       const headers = sanitizeHeaders(req.headers);
@@ -79,7 +84,7 @@ export class ZenClient {
       let upstream: Response;
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), CONFIG.requestTimeoutMs);
+        const timer = setTimeout(() => controller.abort(), getSettings().requestTimeoutMs);
         const onAbort = (): void => controller.abort();
         req.signal?.addEventListener('abort', onAbort, { once: true });
         try {
@@ -101,14 +106,18 @@ export class ZenClient {
       }
 
       if (!RETRYABLE_STATUS.has(upstream.status)) {
+        this.metrics?.ok();
         return this.toResult(upstream);
       }
 
       // 429 / quota / transient 5xx: park the token, rotate egress IP,
       // mint a fresh session id, then retry transparently.
       this.pool.markLimited(account.id);
-      this.rotator.rotate();
+      const newProxy = this.rotator.rotate();
       this.sessions.rotate();
+      this.metrics?.limited(account.id);
+      this.metrics?.rotated(newProxy);
+      this.metrics?.retried();
       try {
         await upstream.body?.cancel();
       } catch {
@@ -118,7 +127,7 @@ export class ZenClient {
       await sleep(backoff(attempt));
     }
 
-    throw httpError(502, `upstream unreachable after ${CONFIG.maxRetries + 1} attempts: ${String(lastError)}`);
+    throw httpError(502, `upstream unreachable after ${maxRetries + 1} attempts: ${String(lastError)}`);
   }
 
   private toResult(upstream: Response): ForwardResult {
