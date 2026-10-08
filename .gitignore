@@ -1,0 +1,7 @@
+node_modules/
+dist/
+accounts.json
+proxies.json
+.env
+*.log
+.DS_Store
