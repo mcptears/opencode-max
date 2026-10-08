@@ -7,7 +7,7 @@ import { ProxyAgent } from 'undici';
  * through a different proxy. Each rotation advances to the next proxy in the pool.
  */
 export class IpRotator {
-  private readonly proxies: string[];
+  private proxies: string[];
   private index = 0;
   private readonly agentCache = new Map<string, ProxyAgent>();
   rotations = 0;
@@ -31,6 +31,13 @@ export class IpRotator {
     this.index = (this.index + 1) % this.proxies.length;
     this.rotations += 1;
     return this.current();
+  }
+
+  /** Hot-swap the proxy list (dashboard edits). Keeps the rotation position sane. */
+  setProxies(proxies: string[]): void {
+    this.proxies = proxies;
+    this.agentCache.clear();
+    if (this.index >= this.proxies.length) this.index = 0;
   }
 
   dispatcherFor(proxy: string | null): ProxyAgent | undefined {
