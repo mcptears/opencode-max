@@ -17,6 +17,8 @@ export interface Settings {
   proxyHealthIntervalMs: number;
   /** Direct-egress IP family: 'auto' alternates v4/v6 on dual-stack hosts. */
   egressFamily: 'auto' | '4' | '6';
+  /** Rolling 5h request budget per account before the pool steers away. */
+  quota5hLimit: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -44,6 +46,7 @@ function fromEnv(): Settings {
     proxyHealthCheck: bool(process.env.PROXY_HEALTH_CHECK, true),
     proxyHealthIntervalMs: num(process.env.PROXY_HEALTH_INTERVAL_MS, 60000),
     egressFamily: parseEgressFamily(process.env.EGRESS_FAMILY),
+    quota5hLimit: num(process.env.QUOTA_5H_LIMIT, 200),
   };
 }
 
@@ -74,6 +77,7 @@ let current: Settings = (() => {
           raw.egressFamily === '4' || raw.egressFamily === '6' || raw.egressFamily === 'auto'
             ? raw.egressFamily
             : base.egressFamily,
+        quota5hLimit: num(raw.quota5hLimit, base.quota5hLimit),
       };
     }
   } catch {
@@ -109,6 +113,8 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       patch.egressFamily === '4' || patch.egressFamily === '6' || patch.egressFamily === 'auto'
         ? patch.egressFamily
         : current.egressFamily,
+    quota5hLimit:
+      patch.quota5hLimit !== undefined ? num(patch.quota5hLimit, current.quota5hLimit) : current.quota5hLimit,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
