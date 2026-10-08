@@ -1,15 +1,16 @@
 {
   "dependencies": {
     "express": "^4.21.2",
-    "undici": "^6.21.1",
-    "systray": "^1.0.5"
+    "systray": "^1.0.5",
+    "undici": "^6.21.1"
   },
   "description": "Unified proxy wrapper combining IP rotation and multi-account API key management for OpenCode Zen",
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.3"
   },
   "engines": {
     "node": ">=18"
@@ -23,7 +24,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "tray": "node dist/index.js --tray",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "test": "vitest run"
   },
   "type": "module",
   "version": "1.0.0",
