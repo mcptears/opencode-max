@@ -43,6 +43,14 @@ On **429 / quota / transient 5xx** from upstream:
 retries or IP rotations. It stays out of rotation until you fix it and hit
 **Reset** in the dashboard (`POST /api/accounts/:id/reset`).
 
+### Proxy health checks
+
+Proxies are probed periodically (default every 60s, `PROXY_HEALTH_INTERVAL_MS`)
+through their own dispatcher against the upstream models endpoint. A proxy that
+fails twice in a row is marked **down** and skipped by rotation until it
+recovers; transitions are logged as events. Toggle with `PROXY_HEALTH_CHECK=0`
+or the dashboard settings checkbox. Credentials are redacted in all status output.
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
