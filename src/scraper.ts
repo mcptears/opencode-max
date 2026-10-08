@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { ProxyAgent } from 'undici';
 import { projectRoot } from './paths.js';
 
-export type ProviderFormat = 'text' | 'geonode' | 'spys';
+export type ProviderFormat = 'text' | 'geonode' | 'spys' | 'fpl' | 'proxynova';
 
 export interface ProxyProvider {
   id: string;
@@ -47,6 +47,20 @@ export const DEFAULT_PROVIDERS: ProxyProvider[] = [
     enabled: true,
   },
   {
+    id: 'freeproxylist',
+    name: 'free-proxy-list.net',
+    url: 'https://free-proxy-list.net/',
+    format: 'fpl',
+    enabled: true,
+  },
+  {
+    id: 'proxynova',
+    name: 'ProxyNova',
+    url: 'https://www.proxynova.com/proxy-server-list/',
+    format: 'proxynova',
+    enabled: true,
+  },
+  {
     id: 'geonode',
     name: 'GeoNode',
     url: 'https://proxylist.geonode.com/api/proxy-list?limit=120&page=1&sort_by=lastChecked&sort_type=desc',
@@ -77,6 +91,8 @@ export function saveProviders(providers: ProxyProvider[]): void {
 /** Extract http://ip:port candidates from a provider response. */
 export function parseProxies(text: string, format: ProviderFormat): string[] {
   if (format === 'spys') return parseSpysProxies(text);
+  if (format === 'fpl') return parseFplProxies(text);
+  if (format === 'proxynova') return parseProxynovaProxies(text);
   const out: string[] = [];
   if (format === 'geonode') {
     try {
@@ -141,6 +157,44 @@ export function parseSpysProxies(html: string): string[] {
   return out;
 }
 
+/**
+ * free-proxy-list.net: plain table rows `<tr><td>IP</td><td>PORT</td>...`.
+ */
+export function parseFplProxies(html: string): string[] {
+  const out: string[] = [];
+  const re = /<tr><td>(\d{1,3}(?:\.\d{1,3}){3})<\/td><td>(\d{2,5})<\/td>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) out.push(`http://${m[1]}:${m[2]}`);
+  return out;
+}
+
+/**
+ * proxynova.com: the IP is a pure-JS string expression inside
+ * `<script>document.write(EXPR)</script>`; the port is plain text in the
+ * next cell. We evaluate just the expression in an empty vm sandbox.
+ */
+export function parseProxynovaProxies(html: string): string[] {
+  const out: string[] = [];
+  const rowRe = /<tr data-proxy-id="\d+">(.*?)<\/tr>/gs;
+  let row: RegExpExecArray | null;
+  while ((row = rowRe.exec(html)) !== null) {
+    const tds = [...row[1].matchAll(/<td[^>]*>(.*?)<\/td>/gs)].map((x) => x[1]);
+    if (tds.length < 2) continue;
+    const exprM = tds[0].match(/document\.write\((.*)\)<\/script>/s);
+    const port = tds[1].replace(/<[^>]+>/g, '').trim();
+    if (!exprM || !/^\d{2,5}$/.test(port)) continue;
+    try {
+      const sandbox: Record<string, unknown> = {};
+      vm.createContext(sandbox);
+      const ip = String(vm.runInContext(`(${exprM[1]})`, sandbox, { timeout: 1000 }));
+      if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) out.push(`http://${ip}:${port}`);
+    } catch {
+      /* expression changed shape -> skip the row */
+    }
+  }
+  return out;
+}
+
 export interface ScrapeResult {  startedAt: number;
   finishedAt: number;
   providers: { id: string; name: string; ok: boolean; found: number; error?: string }[];
@@ -160,9 +214,9 @@ export async function fetchProvider(provider: ProxyProvider, timeoutMs = 20000):
       signal: controller.signal,
       headers: {
         'user-agent':
-          provider.format === 'spys'
-            ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
-            : 'opencode-max/1.0',
+          provider.format === 'text' || provider.format === 'geonode'
+            ? 'opencode-max/1.0'
+            : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
       },
       ...(envProxy ? { dispatcher: new ProxyAgent(envProxy) } : {}),
     } as RequestInit & { dispatcher?: unknown });
