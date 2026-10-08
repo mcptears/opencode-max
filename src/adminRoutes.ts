@@ -82,6 +82,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       accounts: pool.status(),
       ip: rotator.status(),
       metrics: metrics.summary(),
+      quota5hLimit: s.quota5hLimit,
     });
   });
 
@@ -196,7 +197,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   router.post('/api/settings', (req, res) => {
     const body = jsonBody(req) as Record<string, unknown>;
     const patch: Record<string, unknown> = {};
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'adminToken'] as const) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'adminToken', 'quota5hLimit'] as const) {
       if (body[k] !== undefined) patch[k] = body[k];
     }
     if (typeof body.proxyHealthCheck === 'boolean') patch.proxyHealthCheck = body.proxyHealthCheck;
