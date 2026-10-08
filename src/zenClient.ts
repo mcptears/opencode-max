@@ -99,7 +99,7 @@ export class ZenClient {
             method: req.method,
             headers,
             body,
-            dispatcher: this.rotator.dispatcherFor(proxy),
+            dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
             signal: controller.signal,
           } as RequestInit & { dispatcher?: unknown });
         } finally {
@@ -143,10 +143,10 @@ export class ZenClient {
       // 429 / quota / transient 5xx: park the token, rotate egress IP,
       // mint a fresh session id, then retry transparently.
       this.pool.markLimited(account.id);
-      const newProxy = this.rotator.rotate();
+      this.rotator.rotate();
       this.sessions.rotate();
       this.metrics?.limited(account.id);
-      this.metrics?.rotated(newProxy);
+      this.metrics?.rotated(this.rotator.egressLabel());
       this.metrics?.retried();
       try {
         await upstream.body?.cancel();
