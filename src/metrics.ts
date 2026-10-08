@@ -26,6 +26,7 @@ export class Metrics {
   rateLimited = 0;
   rotations = 0;
   retries = 0;
+  tokensSaved = 0;
   readonly perAccount = new Map<string, number>();
   private readonly events: MetricEvent[] = [];
 
@@ -77,6 +78,11 @@ export class Metrics {
 
   retried(): void {
     this.retries += 1;
+  }
+
+  /** Estimated tokens saved by the token saver (chars/4 heuristic). */
+  addTokensSaved(n: number): void {
+    this.tokensSaved += n;
   }
 
   /** Log one completed proxied request (called once per forward()). */
@@ -135,6 +141,7 @@ export class Metrics {
       rateLimited: this.rateLimited,
       rotations: this.rotations,
       retries: this.retries,
+      tokensSaved: this.tokensSaved,
       perAccount: Object.fromEntries(this.perAccount),
     };
   }
