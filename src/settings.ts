@@ -19,6 +19,9 @@ export interface Settings {
   egressFamily: 'auto' | '4' | '6';
   /** Rolling 5h request budget per account before the pool steers away. */
   quota5hLimit: number;
+  /** Compress bloated tool_result payloads before forwarding (saves tokens). */
+  tokenSaver: boolean;
+  tokenSaverMaxChars: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -47,6 +50,8 @@ function fromEnv(): Settings {
     proxyHealthIntervalMs: num(process.env.PROXY_HEALTH_INTERVAL_MS, 60000),
     egressFamily: parseEgressFamily(process.env.EGRESS_FAMILY),
     quota5hLimit: num(process.env.QUOTA_5H_LIMIT, 200),
+    tokenSaver: bool(process.env.TOKEN_SAVER, true),
+    tokenSaverMaxChars: num(process.env.TOKEN_SAVER_MAX_CHARS, 20000),
   };
 }
 
@@ -78,6 +83,8 @@ let current: Settings = (() => {
             ? raw.egressFamily
             : base.egressFamily,
         quota5hLimit: num(raw.quota5hLimit, base.quota5hLimit),
+        tokenSaver: typeof raw.tokenSaver === 'boolean' ? raw.tokenSaver : base.tokenSaver,
+        tokenSaverMaxChars: num(raw.tokenSaverMaxChars, base.tokenSaverMaxChars),
       };
     }
   } catch {
@@ -115,6 +122,9 @@ export function saveSettings(patch: Partial<Settings>): Settings {
         : current.egressFamily,
     quota5hLimit:
       patch.quota5hLimit !== undefined ? num(patch.quota5hLimit, current.quota5hLimit) : current.quota5hLimit,
+    tokenSaver: typeof patch.tokenSaver === 'boolean' ? patch.tokenSaver : current.tokenSaver,
+    tokenSaverMaxChars:
+      patch.tokenSaverMaxChars !== undefined ? num(patch.tokenSaverMaxChars, current.tokenSaverMaxChars) : current.tokenSaverMaxChars,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
