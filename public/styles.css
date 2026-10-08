@@ -93,6 +93,10 @@ textarea{font-family:ui-monospace,monospace;font-size:13px;resize:vertical}
 .plist li{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#0d1128;border:1px solid var(--line);border-radius:11px;padding:10px 14px;font-family:ui-monospace,monospace;font-size:13px}
 .plist li.current{border-color:var(--acc2);box-shadow:0 0 0 1px rgba(0,212,255,.3)}
 .plist .tag{font-size:10.5px;background:rgba(0,212,255,.14);color:var(--acc2);border-radius:6px;padding:2px 8px;margin-left:8px;font-family:sans-serif}
+.plist .tag.ok{background:rgba(52,217,123,.14);color:var(--ok)}
+.plist .tag.bad{background:rgba(255,93,108,.14);color:var(--bad)}
+label.check{display:flex;flex-direction:row;align-items:center;gap:10px;cursor:pointer}
+label.check input{width:auto;accent-color:var(--acc)}
 .events{list-style:none;display:grid;gap:8px;max-height:320px;overflow:auto;padding-right:4px}
 .events li{font-size:13px;background:#0d1128;border:1px solid var(--line);border-radius:10px;padding:9px 12px}
 .events .t{color:var(--dim);margin-right:10px;font-family:ui-monospace,monospace;font-size:11px}
