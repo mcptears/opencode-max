@@ -66,6 +66,49 @@ The server listens on **port 8080** by default. Point OpenCode at it:
 }
 ```
 
+## 🖥️ Dashboard, tray & auto-start (9router-style)
+
+**Web dashboard** — everything is configurable in the browser, no terminal needed:
+
+```bash
+npm start -- --open        # start + open the dashboard
+# or just visit http://127.0.0.1:8080/dashboard
+```
+
+The dashboard shows live status (requests, 429s, rotations, uptime), lets you
+**add/remove accounts** (keys are never displayed), **edit the proxy pool**,
+trigger **manual IP rotation**, tweak **all settings** (retry policy, cooldowns,
+upstream, admin token), and watch a live event log.
+
+**System tray** — hide the terminal, control from the tray icon:
+
+```bash
+npm run tray   # node dist/index.js --tray
+```
+
+Tray menu: Open Dashboard · Rotate IP now · Enable/disable auto-start · Quit.
+Uses the `systray` package on macOS/Linux and a PowerShell `NotifyIcon`
+(zero binaries) on Windows. On headless systems it falls back to terminal mode.
+
+**Auto-start on login** — toggle it from the tray menu or run once:
+
+```bash
+node dist/index.js --tray   # then enable via tray menu
+```
+
+Mechanism per OS (same approach as 9router): macOS LaunchAgent
+(`~/Library/LaunchAgents/com.opencode-max.autostart.plist`), Windows Startup
+folder `.vbs` (hidden window), Linux XDG autostart
+(`~/.config/autostart/opencode-max.desktop`).
+
+**Headless / server auto-run:**
+
+```bash
+./scripts/install-service-linux.sh --enable-now   # systemd user service (Linux)
+# or
+pm2 start ecosystem.config.cjs && pm2 startup     # pm2 (any OS)
+```
+
 ## Configuration
 
 | Variable | Default | Meaning |
