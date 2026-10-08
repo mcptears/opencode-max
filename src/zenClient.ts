@@ -28,6 +28,10 @@ export interface ForwardResult {
 /** Statuses worth a transparent retry: 429/quota plus transient 5xx. */
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
+/** Body patterns that mean "this key is dead" (vs quota/rate-limit 403s). */
+const INVALID_KEY_PATTERNS = /invalid[_\s-]?api[_\s-]?key|invalid[_\s-]?key|unauthorized|bad[_\s-]?credentials|incorrect[_\s-]?api[_\s-]?key/i;
+const QUOTA_PATTERNS = /quota|rate[_\s-]?limit|too[_\s-]?many[_\s-]?requests|insufficient/i;
+
 function backoff(attempt: number): number {
   const s = getSettings();
   const exp = Math.min(s.retryMaxMs, s.retryBaseMs * 2 ** attempt);
@@ -58,7 +62,10 @@ export class ZenClient {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const account = this.pool.acquire(req.provider);
       if (!account) {
-        throw httpError(503, 'all accounts exhausted (rate-limited or none configured)');
+        const msg = this.pool.allInvalid(req.provider)
+          ? 'all API keys are flagged invalid — fix them in the dashboard and reset'
+          : 'all accounts exhausted (rate-limited or none configured)';
+        throw httpError(503, msg);
       }
       this.metrics?.hit(account.id);
 
@@ -106,6 +113,29 @@ export class ZenClient {
       }
 
       if (!RETRYABLE_STATUS.has(upstream.status)) {
+        // Dead-key detection: 401, or a 403 that smells like a bad key (not quota).
+        if (upstream.status === 401 || upstream.status === 403) {
+          let probe = '';
+          try {
+            probe = await upstream.clone().text();
+          } catch {
+            /* ignore */
+          }
+          const looksInvalid =
+            upstream.status === 401 ||
+            (INVALID_KEY_PATTERNS.test(probe) && !QUOTA_PATTERNS.test(probe));
+          if (looksInvalid) {
+            this.pool.markInvalid(account.id);
+            this.metrics?.record('error', `invalid API key on ${account.id} — parked until reset`);
+            try {
+              await upstream.body?.cancel();
+            } catch {
+              /* ignore */
+            }
+            lastError = new Error(`invalid API key on account ${account.id}`);
+            continue; // fail over immediately: no backoff, no IP rotation needed
+          }
+        }
         this.metrics?.ok();
         return this.toResult(upstream);
       }
