@@ -45,13 +45,14 @@ async function refresh() {
 
 function accountRows(s, withActions) {
   return s.accounts.map((a) => {
+    const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}" style="margin-left:6px">Reset</button>` : '';
     const cells = withActions
       ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>`
       : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>`;
     return `<tr>${cells}
       <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
       <td>${fmtMs(a.cooldownEndsInMs)}</td>
-      ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button></td>` : ''}</tr>`;
+      ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button>${resetBtn}</td>` : ''}</tr>`;
   }).join('');
 }
 
@@ -75,6 +76,10 @@ function renderStatus(s) {
   tb.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
+    refresh();
+  });
+  tb.querySelectorAll('[data-reset]').forEach((b) => b.onclick = async () => {
+    await api('/api/accounts/' + encodeURIComponent(b.dataset.reset) + '/reset', { method: 'POST' });
     refresh();
   });
 
