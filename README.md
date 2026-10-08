@@ -59,6 +59,16 @@ alternates the connection family on every rotation in `auto` mode — effectivel
 doubling the quota. Pin with `EGRESS_FAMILY=4|6|auto` (or the dashboard settings
 dropdown).
 
+### Per-account quota tracking
+
+Every upstream attempt is counted per account in a rolling **5h window**,
+persisted in an embedded SQLite database (`data/opencode-max.db`, survives
+restarts). The pool steers *away* from accounts before they hit the limit:
+accounts at/over `QUOTA_5H_LIMIT` (default 200, matches Zen's free-tier
+rhythm) are excluded until the window slides, and among equal-priority accounts
+the least-used one is picked first. The dashboard shows live `usage/limit` per
+account with a warning state at 90%.
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
