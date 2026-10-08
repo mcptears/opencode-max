@@ -15,6 +15,8 @@ export interface Settings {
   /** Periodic proxy health probing (skips dead proxies in rotation). */
   proxyHealthCheck: boolean;
   proxyHealthIntervalMs: number;
+  /** Direct-egress IP family: 'auto' alternates v4/v6 on dual-stack hosts. */
+  egressFamily: 'auto' | '4' | '6';
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -41,7 +43,15 @@ function fromEnv(): Settings {
     adminToken: process.env.ADMIN_TOKEN ?? '',
     proxyHealthCheck: bool(process.env.PROXY_HEALTH_CHECK, true),
     proxyHealthIntervalMs: num(process.env.PROXY_HEALTH_INTERVAL_MS, 60000),
+    egressFamily: parseEgressFamily(process.env.EGRESS_FAMILY),
   };
+}
+
+function parseEgressFamily(v: string | undefined): 'auto' | '4' | '6' {
+  const s = (v ?? 'auto').toLowerCase();
+  if (['4', 'v4', 'ipv4'].includes(s)) return '4';
+  if (['6', 'v6', 'ipv6'].includes(s)) return '6';
+  return 'auto';
 }
 
 let current: Settings = (() => {
@@ -60,6 +70,10 @@ let current: Settings = (() => {
         adminToken: typeof raw.adminToken === 'string' ? raw.adminToken : base.adminToken,
         proxyHealthCheck: typeof raw.proxyHealthCheck === 'boolean' ? raw.proxyHealthCheck : base.proxyHealthCheck,
         proxyHealthIntervalMs: num(raw.proxyHealthIntervalMs, base.proxyHealthIntervalMs),
+        egressFamily:
+          raw.egressFamily === '4' || raw.egressFamily === '6' || raw.egressFamily === 'auto'
+            ? raw.egressFamily
+            : base.egressFamily,
       };
     }
   } catch {
@@ -91,6 +105,10 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     proxyHealthCheck: typeof patch.proxyHealthCheck === 'boolean' ? patch.proxyHealthCheck : current.proxyHealthCheck,
     proxyHealthIntervalMs:
       patch.proxyHealthIntervalMs !== undefined ? num(patch.proxyHealthIntervalMs, current.proxyHealthIntervalMs) : current.proxyHealthIntervalMs,
+    egressFamily:
+      patch.egressFamily === '4' || patch.egressFamily === '6' || patch.egressFamily === 'auto'
+        ? patch.egressFamily
+        : current.egressFamily,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
