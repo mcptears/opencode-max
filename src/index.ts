@@ -11,6 +11,7 @@ import { Metrics } from './metrics.js';
 import { projectRoot } from './paths.js';
 import { buildRouter } from './routes.js';
 import { SessionManager } from './sessionManager.js';
+import { QuotaTracker } from './quota.js';
 import { getSettings } from './settings.js';
 import { initTray, isTraySupported } from './tray.js';
 
@@ -70,6 +71,11 @@ async function main(): Promise<void> {
   const rotator = new IpRotator(proxies);
   const sessions = new SessionManager();
   const metrics = new Metrics();
+  const quota = new QuotaTracker();
+  pool.setQuotaTracker(quota);
+  // Prune old usage events hourly so the table stays small.
+  const quotaPruneTimer = setInterval(() => quota.prune(), 3600_000);
+  if (typeof quotaPruneTimer.unref === 'function') quotaPruneTimer.unref();
 
   rotator.onHealthChange = (proxy, healthy) => {
     metrics.record(healthy ? 'rotated' : 'error', `proxy ${healthy ? 'recovered' : 'unhealthy, skipped in rotation'}: ${proxy}`);
@@ -99,7 +105,7 @@ async function main(): Promise<void> {
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(dashboardRoot(), 'dashboard.html')));
   app.get('/', (_req, res) => res.redirect('/dashboard/'));
   app.use(buildAdminRouter({ pool, rotator, sessions, metrics }));
-  app.use(buildRouter(pool, rotator, sessions, metrics));
+  app.use(buildRouter(pool, rotator, sessions, metrics, quota));
 
   // Error handler.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
