@@ -145,6 +145,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ ok: true });
   });
 
+  /** Re-admit a key flagged invalid (use after fixing the key). */
+  router.post('/api/accounts/:id/reset', (req, res) => {
+    pool.clearInvalid(req.params.id);
+    metrics.record('account_added', `account '${req.params.id}' reset after invalid-key flag`);
+    res.json({ ok: true });
+  });
+
   // ---- proxies ----
   router.get('/api/proxies', (_req, res) => {
     const st = rotator.status();
