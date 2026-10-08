@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { ProxyAgent } from 'undici';
 import { projectRoot } from './paths.js';
 
-export type ProviderFormat = 'text' | 'geonode';
+export type ProviderFormat = 'text' | 'geonode' | 'spys';
 
 export interface ProxyProvider {
   id: string;
@@ -39,6 +40,13 @@ export const DEFAULT_PROVIDERS: ProxyProvider[] = [
     enabled: true,
   },
   {
+    id: 'spysone',
+    name: 'spys.one',
+    url: 'https://spys.one/en/',
+    format: 'spys',
+    enabled: true,
+  },
+  {
     id: 'geonode',
     name: 'GeoNode',
     url: 'https://proxylist.geonode.com/api/proxy-list?limit=120&page=1&sort_by=lastChecked&sort_type=desc',
@@ -68,6 +76,7 @@ export function saveProviders(providers: ProxyProvider[]): void {
 
 /** Extract http://ip:port candidates from a provider response. */
 export function parseProxies(text: string, format: ProviderFormat): string[] {
+  if (format === 'spys') return parseSpysProxies(text);
   const out: string[] = [];
   if (format === 'geonode') {
     try {
@@ -92,8 +101,47 @@ export function parseProxies(text: string, format: ProviderFormat): string[] {
   return out;
 }
 
-export interface ScrapeResult {
-  startedAt: number;
+/**
+ * spys.one: ports are XOR-obfuscated in JS (`document.write(":"+(A^B)+...)`)
+ * with the variables defined in a packer'd script on the page.
+ * We run just that script in an empty vm sandbox, read the numeric
+ * variables, and decode each row's port.
+ */
+export function parseSpysProxies(html: string): string[] {
+  const out: string[] = [];
+  try {
+    const packed = html.match(/<script type="text\/javascript">(eval\(function\(p,r,o,x,y,s\)[\s\S]*?)<\/script>/);
+    if (!packed) return out;
+    const sandbox: Record<string, unknown> = {};
+    vm.createContext(sandbox);
+    vm.runInContext(packed[1], sandbox, { timeout: 3000 });
+    const vars = sandbox as Record<string, number>;
+
+    const rowRe =
+      /<font class=spy14>(\d{1,3}(?:\.\d{1,3}){3})<script>document\.write\(":"((?:\+\([A-Za-z0-9]+\^[A-Za-z0-9]+\))*)\)<\/script><\/font><\/td><td colspan=1><font class=spy1>([A-Za-z]+)<\/font>/g;
+    let m: RegExpExecArray | null;
+    while ((m = rowRe.exec(html)) !== null) {
+      const proto = m[3].toLowerCase();
+      if (proto !== 'http' && proto !== 'https') continue;
+      let port = '';
+      for (const pair of m[2].matchAll(/\(([A-Za-z0-9]+)\^([A-Za-z0-9]+)\)/g)) {
+        const a = vars[pair[1]];
+        const b = vars[pair[2]];
+        if (typeof a !== 'number' || typeof b !== 'number') {
+          port = '';
+          break;
+        }
+        port += String(a ^ b);
+      }
+      if (port) out.push(`http://${m[1]}:${port}`);
+    }
+  } catch {
+    /* obfuscation changed -> no candidates rather than garbage */
+  }
+  return out;
+}
+
+export interface ScrapeResult {  startedAt: number;
   finishedAt: number;
   providers: { id: string; name: string; ok: boolean; found: number; error?: string }[];
   found: number;
@@ -110,7 +158,12 @@ export async function fetchProvider(provider: ProxyProvider, timeoutMs = 20000):
     const envProxy = process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? process.env.https_proxy ?? process.env.http_proxy;
     const res = await fetch(provider.url, {
       signal: controller.signal,
-      headers: { 'user-agent': 'opencode-max/1.0' },
+      headers: {
+        'user-agent':
+          provider.format === 'spys'
+            ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+            : 'opencode-max/1.0',
+      },
       ...(envProxy ? { dispatcher: new ProxyAgent(envProxy) } : {}),
     } as RequestInit & { dispatcher?: unknown });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
