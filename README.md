@@ -44,12 +44,30 @@ raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress chang
 
 ## Quick start
 
+One command — installs, builds, and puts `opencode-max` on your PATH (like 9router):
+
+```bash
+git clone https://github.com/mcptears/opencode-max.git
+cd opencode-max
+./scripts/install.sh
+```
+
+Then just type it anywhere — no separate commands:
+
+```bash
+opencode-max --tray    # tray mode (recommended)
+opencode-max --open    # start + open the dashboard
+opencode-max --help    # all options
+```
+
+Manual setup, if you prefer:
+
 ```bash
 npm install
 cp accounts.example.json accounts.json   # add your real keys
 cp proxies.example.json proxies.json     # add your proxies (optional)
 npm run build
-npm start
+npm start                                # or: npm link  →  opencode-max
 ```
 
 The server listens on **port 8080** by default. Point OpenCode at it:
