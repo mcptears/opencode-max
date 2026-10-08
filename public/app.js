@@ -44,11 +44,14 @@ async function refresh() {
 }
 
 function accountRows(s, withActions) {
+  const limit = s.quota5hLimit || 200;
   return s.accounts.map((a) => {
     const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}" style="margin-left:6px">Reset</button>` : '';
+    const usage = a.usage5h || 0;
+    const usageCell = `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span></td>`;
     const cells = withActions
-      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>`
-      : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>`;
+      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>${usageCell}`
+      : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>${usageCell}`;
     return `<tr>${cells}
       <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
       <td>${fmtMs(a.cooldownEndsInMs)}</td>
@@ -70,9 +73,9 @@ function renderStatus(s) {
   ];
   $('#statCards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 
-  $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="4" class="hint">no accounts configured</td></tr>';
+  $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="5" class="hint">no accounts configured</td></tr>';
   const tb = $('#accountsTbl tbody');
-  tb.innerHTML = accountRows(s, true) || '<tr><td colspan="7" class="hint">no accounts configured</td></tr>';
+  tb.innerHTML = accountRows(s, true) || '<tr><td colspan="8" class="hint">no accounts configured</td></tr>';
   tb.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
@@ -135,7 +138,7 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
@@ -166,7 +169,7 @@ $('#proxyForm').onsubmit = async (e) => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
