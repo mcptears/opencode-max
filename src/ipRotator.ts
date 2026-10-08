@@ -1,4 +1,4 @@
-import { ProxyAgent } from 'undici';
+import { Agent, ProxyAgent } from 'undici';
 
 /** Hide credentials when displaying proxy URLs. */
 export function redactProxy(url: string): string {
@@ -14,6 +14,8 @@ export function redactProxy(url: string): string {
     return url.replace(/:\/\/[^@/]+@/, '://***@');
   }
 }
+
+export type EgressFamilyMode = 'auto' | '4' | '6';
 
 export interface ProxyHealth {
   proxy: string; // redacted
@@ -31,19 +33,45 @@ export interface ProxyHealth {
  * Health checks periodically probe every proxy through its own dispatcher and
  * the rotation skips proxies that fail repeatedly, reviving them when they
  * recover.
+ *
+ * When NO proxies are configured, egress is direct and the IP family itself can
+ * be rotated: Zen treats IPv4 and IPv6 as separate buckets, so alternating the
+ * connection family on a dual-stack host doubles the effective quota.
  */
 export class IpRotator {
   private proxies: string[];
   private index = 0;
   private readonly agentCache = new Map<string, ProxyAgent>();
+  private readonly directAgentCache = new Map<number, Agent>();
   private readonly health = new Map<string, { healthy: boolean; fails: number; lastChecked: number }>();
   private timer?: NodeJS.Timeout;
+  private familyMode: EgressFamilyMode = 'auto';
+  private dualStack = false;
+  private family: 4 | 6 = 4;
   rotations = 0;
   /** Called on healthy<->unhealthy transitions (wired to metrics). */
   onHealthChange: ((proxy: string, healthy: boolean) => void) | null = null;
 
   constructor(proxies: string[]) {
     this.proxies = proxies;
+  }
+
+  /** Configure family rotation: 'auto' alternates v4/v6 on dual-stack hosts. */
+  configureEgress(opts: { familyMode?: EgressFamilyMode; dualStack?: boolean }): void {
+    if (opts.familyMode) this.familyMode = opts.familyMode;
+    if (opts.dualStack !== undefined) this.dualStack = opts.dualStack;
+  }
+
+  /** Effective IP family for direct egress right now. */
+  currentFamily(): 4 | 6 {
+    if (this.familyMode === '4' || this.familyMode === '6') return Number(this.familyMode) as 4 | 6;
+    return this.dualStack ? this.family : 4;
+  }
+
+  /** Human-readable current egress for logs and events (credentials redacted). */
+  egressLabel(): string {
+    const p = this.current();
+    return p ? redactProxy(p) : `direct (IPv${this.currentFamily()})`;
   }
 
   get count(): number {
@@ -65,7 +93,14 @@ export class IpRotator {
   /** Rotate to the next proxy. Returns the newly selected proxy (null = direct). */
   rotate(): string | null {
     const pool = this.eligible();
-    if (pool.length === 0) return null;
+    if (pool.length === 0) {
+      // Direct egress: rotate the IP family itself when it buys a fresh bucket.
+      if (this.familyMode === 'auto' && this.dualStack) {
+        this.family = this.family === 4 ? 6 : 4;
+        this.rotations += 1;
+      }
+      return null;
+    }
     this.index = (this.index + 1) % pool.length;
     this.rotations += 1;
     return this.current();
@@ -81,23 +116,43 @@ export class IpRotator {
     if (this.index >= this.proxies.length) this.index = 0;
   }
 
-  dispatcherFor(proxy: string | null): ProxyAgent | undefined {
-    if (!proxy) return undefined;
-    let agent = this.agentCache.get(proxy);
-    if (!agent) {
-      agent = new ProxyAgent(proxy);
-      this.agentCache.set(proxy, agent);
+  /** Dispatcher for one upstream request: a proxy agent, or a direct agent pinned to the current IP family. */
+  dispatcherFor(proxy: string | null, family: 4 | 6 = 4): unknown {
+    if (proxy) {
+      let agent = this.agentCache.get(proxy);
+      if (!agent) {
+        agent = new ProxyAgent(proxy);
+        this.agentCache.set(proxy, agent);
+      }
+      return agent;
     }
-    return agent;
+    let direct = this.directAgentCache.get(family);
+    if (!direct) {
+      direct = new Agent({ connect: { family } } as never);
+      this.directAgentCache.set(family, direct);
+    }
+    return direct;
   }
 
-  status(): { proxies: number; currentIndex: number; current: string | null; rotations: number; health: ProxyHealth[] } {
+  status(): {
+    proxies: number;
+    currentIndex: number;
+    current: string | null;
+    rotations: number;
+    family: 4 | 6;
+    familyMode: EgressFamilyMode;
+    dualStack: boolean;
+    health: ProxyHealth[];
+  } {
     const now = Date.now();
     return {
       proxies: this.proxies.length,
       currentIndex: this.index,
       current: this.current(),
       rotations: this.rotations,
+      family: this.currentFamily(),
+      familyMode: this.familyMode,
+      dualStack: this.dualStack,
       health: this.proxies.map((p) => {
         const h = this.health.get(p);
         return {
