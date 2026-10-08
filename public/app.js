@@ -18,56 +18,70 @@ async function api(path, opts = {}) {
 }
 const jpost = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const jdel = (p) => api(p, { method: 'DELETE' });
-
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtMs = (ms) => ms <= 0 ? '—' : ms < 60000 ? Math.ceil(ms / 1000) + 's' : Math.ceil(ms / 60000) + 'm';
 const fmtTime = (t) => new Date(t).toLocaleTimeString();
 
-let lastStatus = null;
+// ---- section navigation ----
+const TITLES = { overview: 'Overview', accounts: 'Accounts', proxies: 'Proxies', settings: 'Settings', events: 'Events', setup: 'Setup' };
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach((x) => x.classList.remove('active'));
+  document.querySelectorAll('.sec').forEach((x) => x.classList.remove('active'));
+  b.classList.add('active');
+  $('#sec-' + b.dataset.sec).classList.add('active');
+  $('#secTitle').textContent = TITLES[b.dataset.sec];
+});
 
 async function refresh() {
   try {
     const res = await api('/api/status');
     if (!res.ok) throw new Error(res.status);
-    lastStatus = await res.json();
-    renderStatus(lastStatus);
-  } catch (e) {
+    renderStatus(await res.json());
+  } catch {
     $('#statusPill').textContent = 'offline';
     $('#statusPill').className = 'pill';
   }
 }
 
+function accountRows(s, withActions) {
+  return s.accounts.map((a) => {
+    const cells = withActions
+      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>`
+      : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>`;
+    return `<tr>${cells}
+      <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
+      <td>${fmtMs(a.cooldownEndsInMs)}</td>
+      ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button></td>` : ''}</tr>`;
+  }).join('');
+}
+
 function renderStatus(s) {
   const active = s.accounts.filter((a) => a.state === 'active').length;
-  $('#statusPill').textContent = `● running · ${active}/${s.accounts.length} accounts`;
+  $('#statusPill').textContent = `● live · ${active}/${s.accounts.length} accounts`;
   $('#statusPill').className = 'pill on';
+  $('#egressLabel').textContent = s.ip.current || 'direct egress';
+
   const m = s.metrics;
   const cards = [
-    ['Requests', m.requests], ['Success', m.successes], ['429s', m.rateLimited],
-    ['Rotations', m.rotations], ['Retries', m.retries],
-    ['Uptime', `<small>${Math.floor(m.uptimeSec / 60)}m</small>`],
-    ['Egress', s.ip.current ? `<small style="word-break:break-all">${esc(s.ip.current)}</small>` : '<small>direct</small>'],
+    ['Requests', m.requests], ['Succeeded', m.successes], ['Rate limited', m.rateLimited],
+    ['IP rotations', m.rotations], ['Retries', m.retries],
+    ['Uptime', `${Math.floor(m.uptimeSec / 60)}<small> min</small>`],
   ];
   $('#statCards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 
+  $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="4" class="hint">no accounts configured</td></tr>';
   const tb = $('#accountsTbl tbody');
-  tb.innerHTML = s.accounts.map((a) => `<tr>
-    <td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td>
-    <td>P${a.priority}</td>
-    <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
-    <td>${fmtMs(a.cooldownEndsInMs)}</td>
-    <td><button class="btn danger" data-del="${esc(a.id)}">Remove</button></td>
-  </tr>`).join('');
+  tb.innerHTML = accountRows(s, true) || '<tr><td colspan="7" class="hint">no accounts configured</td></tr>';
   tb.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
     refresh();
   });
 
-  $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations`;
-  $('#proxyList').innerHTML = s.ip.proxies === 0
-    ? '<li>direct egress (no proxies configured)</li>'
-    : (window._proxies || []).map((p) =>
-        `<li class="${p === s.ip.current ? 'current' : ''}"><span>${esc(p)}</span><button class="btn danger" data-px="${esc(p)}">Remove</button></li>`).join('');
+  $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
+  $('#proxyList').innerHTML = (window._proxies || []).length === 0
+    ? '<li>direct egress — no proxies configured</li>'
+    : window._proxies.map((p) => `<li class="${p === s.ip.current ? 'current' : ''}"><span>${esc(p)}${p === s.ip.current ? '<span class="tag">active</span>' : ''}</span><button class="btn danger" data-px="${esc(p)}">Remove</button></li>`).join('');
   document.querySelectorAll('#proxyList [data-px]').forEach((b) => b.onclick = async () => {
     await api('/api/proxies?proxy=' + encodeURIComponent(b.dataset.px), { method: 'DELETE' });
     loadProxies(); refresh();
@@ -90,23 +104,17 @@ function renderStatus(s) {
 }`;
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 async function renderEvents() {
   try {
-    const r = await api('/api/metrics');
-    const { events } = await r.json();
-    $('#eventsList').innerHTML = events.map((e) =>
-      `<li><span class="t">${fmtTime(e.t)}</span><span class="k k-${e.kind}">${e.kind}</span>${esc(e.detail)}</li>`).join('') || '<li>no events yet</li>';
+    const d = await (await api('/api/metrics')).json();
+    $('#eventsList').innerHTML = d.events.map((e) =>
+      `<li><span class="t">${fmtTime(e.t)}</span><span class="k k-${e.kind}">${e.kind.replace(/_/g, ' ')}</span>${esc(e.detail)}</li>`).join('') || '<li class="hint">no events yet</li>';
   } catch { /* ignore */ }
 }
 
 async function loadProxies() {
   try {
-    const r = await api('/api/proxies');
-    const d = await r.json();
+    const d = await (await api('/api/proxies')).json();
     window._proxies = d.proxies;
     $('#proxyForm').proxies.value = d.proxies.join('\n');
   } catch { /* ignore */ }
@@ -114,11 +122,10 @@ async function loadProxies() {
 
 async function loadSettings() {
   try {
-    const r = await api('/api/settings');
-    const { settings } = await r.json();
+    const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
     for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port']) {
-      if (f[k] && settings[k] !== undefined) f[k].value = settings[k];
+      if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
   } catch { /* ignore */ }
 }
@@ -128,10 +135,7 @@ $('#btnRotate').onclick = async () => { await api('/v1/rotate', { method: 'POST'
 $('#accountForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
-  const body = {
-    id: f.id.value.trim(), name: f.name.value.trim(), provider: f.provider.value.trim(),
-    apiKey: f.apiKey.value.trim(), priority: Number(f.priority.value),
-  };
+  const body = { id: f.id.value.trim(), name: f.name.value.trim(), provider: f.provider.value.trim(), apiKey: f.apiKey.value.trim(), priority: Number(f.priority.value) };
   if (f.cooldownPeriod.value) body.cooldownPeriod = Number(f.cooldownPeriod.value);
   const r = await jpost('/api/accounts', body);
   if (r.ok) { f.reset(); f.provider.value = 'opencode-zen'; f.priority.value = '1'; }
@@ -155,14 +159,14 @@ $('#settingsForm').onsubmit = async (e) => {
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
   const d = await r.json().catch(() => ({}));
-  $('#settingsMsg').textContent = r.ok ? 'Saved ✓' + (d.restartRequired ? ' — restart required for port change.' : '') : 'Save failed.';
+  $('#settingsMsg').textContent = r.ok ? '✓ Saved' + (d.restartRequired ? ' — restart required for the port change.' : '') : 'Save failed.';
   f.adminToken.value = '';
   refresh();
 };
 
 $('#btnCopy').onclick = () => {
   navigator.clipboard.writeText($('#opencodeSnippet').textContent).then(() => {
-    $('#btnCopy').textContent = 'Copied ✓';
+    $('#btnCopy').textContent = '✓ Copied';
     setTimeout(() => $('#btnCopy').textContent = 'Copy snippet', 1500);
   });
 };
