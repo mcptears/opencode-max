@@ -69,6 +69,14 @@ rhythm) are excluded until the window slides, and among equal-priority accounts
 the least-used one is picked first. The dashboard shows live `usage/limit` per
 account with a warning state at 90%.
 
+### Metrics history (SQLite)
+
+Request log (status, latency, model) and the event feed are persisted in the
+same SQLite database and survive restarts — the event feed is backfilled on
+boot. `GET /api/metrics/history?hours=24` returns hourly buckets, rendered as a
+traffic chart on the Overview page (amber dots mark hours with rate limits).
+30 days of history are retained.
+
 This mirrors OpenCode Zen's real behavior: the rate-limit bucket is keyed on the
 raw egress IP (~15–20 RPM, no `retry-after` header), so a genuine egress change
 — not header spoofing — is what resets the bucket.
