@@ -84,9 +84,14 @@ function renderStatus(s) {
   });
 
   $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
+  const health = window._health || [];
   $('#proxyList').innerHTML = (window._proxies || []).length === 0
     ? '<li>direct egress — no proxies configured</li>'
-    : window._proxies.map((p) => `<li class="${p === s.ip.current ? 'current' : ''}"><span>${esc(p)}${p === s.ip.current ? '<span class="tag">active</span>' : ''}</span><button class="btn danger" data-px="${esc(p)}">Remove</button></li>`).join('');
+    : window._proxies.map((p, i) => {
+        const h = health[i];
+        const badge = h ? (h.healthy ? '<span class="tag ok">healthy</span>' : '<span class="tag bad">down</span>') : '<span class="tag">checking…</span>';
+        return `<li class="${p === s.ip.current ? 'current' : ''}"><span>${esc(p)}${p === s.ip.current ? '<span class="tag">active</span>' : ''}${badge}</span><button class="btn danger" data-px="${esc(p)}">Remove</button></li>`;
+      }).join('');
   document.querySelectorAll('#proxyList [data-px]').forEach((b) => b.onclick = async () => {
     await api('/api/proxies?proxy=' + encodeURIComponent(b.dataset.px), { method: 'DELETE' });
     loadProxies(); refresh();
@@ -121,6 +126,7 @@ async function loadProxies() {
   try {
     const d = await (await api('/api/proxies')).json();
     window._proxies = d.proxies;
+    window._health = d.health;
     $('#proxyForm').proxies.value = d.proxies.join('\n');
   } catch { /* ignore */ }
 }
@@ -129,9 +135,10 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
+    if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
   } catch { /* ignore */ }
 }
 
@@ -158,9 +165,10 @@ $('#proxyForm').onsubmit = async (e) => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
+  body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
   const d = await r.json().catch(() => ({}));
