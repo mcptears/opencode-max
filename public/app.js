@@ -37,6 +37,7 @@ async function refresh() {
     const res = await api('/api/status');
     if (!res.ok) throw new Error(res.status);
     renderStatus(await res.json());
+    drawTraffic();
   } catch {
     $('#statusPill').textContent = 'offline';
     $('#statusPill').className = 'pill';
@@ -57,6 +58,53 @@ function accountRows(s, withActions) {
       <td>${fmtMs(a.cooldownEndsInMs)}</td>
       ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button>${resetBtn}</td>` : ''}</tr>`;
   }).join('');
+}
+
+let lastChartDraw = 0;
+async function drawTraffic() {
+  const now = Date.now();
+  if (now - lastChartDraw < 10000) return; // throttle
+  lastChartDraw = now;
+  const cv = $('#trafficChart');
+  if (!cv || !cv.isConnected) return;
+  let buckets = [];
+  try {
+    buckets = (await (await api('/api/metrics/history?hours=24')).json()).buckets;
+  } catch { return; }
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 600, h = 120;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  if (!buckets.length) {
+    ctx.fillStyle = '#8a8fb0'; ctx.font = '12px sans-serif';
+    ctx.fillText('no traffic yet', 12, h / 2);
+    return;
+  }
+  const max = Math.max(1, ...buckets.map((b) => b.requests));
+  const bw = w / buckets.length;
+  buckets.forEach((b, i) => {
+    const bh = Math.max(2, (b.requests / max) * (h - 24));
+    const x = i * bw + bw * 0.15, ww = bw * 0.7;
+    const grad = ctx.createLinearGradient(0, h - bh, 0, h);
+    grad.addColorStop(0, '#7c5cff'); grad.addColorStop(1, '#00d4ff');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(x, h - 16 - bh, ww, bh, 3);
+    ctx.fill();
+    if (b.rateLimited > 0) {
+      ctx.fillStyle = '#ffb02e';
+      ctx.beginPath();
+      ctx.arc(x + ww / 2, h - 16 - bh - 5, 3, 0, 7);
+      ctx.fill();
+    }
+  });
+  ctx.fillStyle = '#8a8fb0'; ctx.font = '10px sans-serif';
+  const first = new Date(buckets[0].hour), last = new Date(buckets[buckets.length - 1].hour);
+  ctx.fillText(first.toLocaleString([], { hour: 'numeric' }), 4, h - 2);
+  const lt = last.toLocaleString([], { hour: 'numeric' });
+  ctx.fillText(lt, w - ctx.measureText(lt).width - 4, h - 2);
 }
 
 function renderStatus(s) {
