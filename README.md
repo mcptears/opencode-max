@@ -23,12 +23,16 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 59 unit tests, `npm test` |
+| 🧪 | **Tested** | 69 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 | 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
 | 🛟 | **Cross-provider failover** | Primary down? Requests spill over to the next eligible provider |
 | ⏰ | **Auto-scrape** | Re-scrapes free proxies on a schedule to keep the pool fresh |
+| ⚡ | **Latency routing** | Pick the fastest healthy account, not just P1 first |
+| ⏳ | **Request queue** | Waits for a cooling account instead of 503ing |
+| 🔔 | **Down alerts** | Webhook ping on dead keys / pool exhaustion (Telegram-ready) |
+| 📊 | **Per-model stats** | Dashboard breakdown: requests, errors, latency per model |
 
 ## ⚙️ How it works
 
@@ -149,6 +153,23 @@ When a provider's accounts are all exhausted (or its upstream is down), the requ
 
 The scraper can run itself: enable **Auto-scrape** in Settings (or `AUTO_SCRAPE=1`) and set the interval (`AUTO_SCRAPE_INTERVAL_HOURS`, default 6). The first run fires 60s after boot, then on schedule; toggle and interval changes apply live without restart. The scraper tab shows when the last run happened and whether it was scheduled.
 
+### Latency-based routing
+
+Every successful request feeds an exponential moving average of latency per account (shown in the accounts table). Set **Routing strategy** to `latency` (or `ROUTING_STRATEGY=latency`) and the pool picks the fastest-known account instead of strict priority order — new accounts are tried first so they get a measurement. Default `priority` keeps P1-first with latency as the tiebreaker.
+
+### Request queue
+
+When every account is cooling down, requests now wait for the soonest cooldown to expire (once, capped by `QUEUE_MAX_WAIT_MS`, default 30s) instead of failing fast with 503. Set it to `0` to restore immediate 503s.
+
+### Down alerts
+
+Set **Alert webhook URL** (or `ALERT_WEBHOOK_URL`) to get a JSON POST on dead keys and pool exhaustion — 15-minute dedupe per event so it can't spam. For Telegram, use your bot URL with the chat id as a query param:
+`https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>`
+
+### Per-model stats
+
+The Overview dashboard shows a **Models** table: requests, errors and average latency per model over the last 24h, with the top provider per model. Same data as JSON at `GET /api/metrics/models?hours=24`.
+
 ## 🐳 Docker
 
 ```bash
@@ -236,6 +257,9 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | `TOKEN_SAVER_MAX_CHARS` | `20000` | Max chars per tool result |
 | `AUTO_SCRAPE` | `0` | Re-scrape free proxies on a schedule |
 | `AUTO_SCRAPE_INTERVAL_HOURS` | `6` | Hours between scheduled scrapes |
+| `ROUTING_STRATEGY` | `priority` | `priority` (P1 first) or `latency` (fastest first) |
+| `QUEUE_MAX_WAIT_MS` | `30000` | Max wait for a cooling account before 503 (`0` = fail fast) |
+| `ALERT_WEBHOOK_URL` | _(empty)_ | JSON webhook for dead-key / pool-exhaustion alerts |
 
 `accounts.json` — array of `{ id, name, provider, apiKey, priority, cooldownPeriod?, baseUrl? }`.
 `proxies.json` — array (or `{ "proxies": [...] }`) of `http://user:pass@host:port` URLs.
