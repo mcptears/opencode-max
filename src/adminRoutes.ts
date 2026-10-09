@@ -487,8 +487,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   router.get('/api/settings', (_req, res) => {
     const s = getSettings();
     res.json({
-      settings: { ...s, adminToken: s.adminToken ? '••••••••' : '', alertWebhookUrl: s.alertWebhookUrl ? '••••••••' : '' },
+      settings: { ...s, adminToken: s.adminToken ? '••••••••' : '', alertWebhookUrl: s.alertWebhookUrl ? '••••••••' : '', clientTokens: [] },
       adminTokenSet: s.adminToken.length > 0,
+      clientTokensCount: s.clientTokens.length,
       alertWebhookSet: s.alertWebhookUrl.length > 0,
       settingsFile: settingsFilePath(),
     });
@@ -521,6 +522,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (body.errorSpikeThreshold !== undefined) patch.errorSpikeThreshold = body.errorSpikeThreshold;
     if (body.errorSpikeWindowMin !== undefined) patch.errorSpikeWindowMin = body.errorSpikeWindowMin;
     if (body.errorSpikeMinRequests !== undefined) patch.errorSpikeMinRequests = body.errorSpikeMinRequests;
+    // Client tokens: dashboard sends a comma-separated string only when replacing;
+    // clearClientTokens wipes them. Never redacted into the page, count only.
+    if (typeof body.clearClientTokens === 'boolean' && body.clearClientTokens) {
+      patch.clientTokens = [];
+    } else if (typeof body.clientTokens === 'string' && body.clientTokens.trim()) {
+      patch.clientTokens = body.clientTokens.split(',').map((t) => t.trim()).filter(Boolean);
+    }
     // Port changes are saved but only take effect after a restart.
     const portChanged = body.port !== undefined && Number(body.port) !== getSettings().port;
     if (body.port !== undefined) patch.port = body.port;
@@ -530,7 +538,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (next.proxyHealthCheck) rotator.startHealthChecks(next.proxyHealthIntervalMs);
     rotator.configureEgress({ familyMode: next.egressFamily });
     metrics.record('settings', 'settings updated via dashboard');
-    res.json({ ok: true, restartRequired: portChanged, settings: { ...next, adminToken: next.adminToken ? '••••••••' : '' } });
+    res.json({ ok: true, restartRequired: portChanged, settings: { ...next, adminToken: next.adminToken ? '••••••••' : '', clientTokens: [] }, clientTokensCount: next.clientTokens.length });
   });
 
   // ---- backup / restore ----
