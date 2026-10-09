@@ -33,6 +33,8 @@ export interface Settings {
   alertWebhookUrl: string;
   /** Max parallel in-flight requests per account (0 = unlimited). */
   accountConcurrency: number;
+  /** Consecutive real-request failures before a proxy is auto-dropped (0 = off). */
+  proxyAutoDropFails: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -69,6 +71,7 @@ function fromEnv(): Settings {
     queueMaxWaitMs: num(process.env.QUEUE_MAX_WAIT_MS, 30000),
     alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? '',
     accountConcurrency: num(process.env.ACCOUNT_CONCURRENCY, 4),
+    proxyAutoDropFails: num(process.env.PROXY_AUTO_DROP_FAILS, 5),
   };
 }
 
@@ -112,6 +115,7 @@ let current: Settings = (() => {
         queueMaxWaitMs: num(raw.queueMaxWaitMs, base.queueMaxWaitMs),
         alertWebhookUrl: typeof raw.alertWebhookUrl === 'string' ? raw.alertWebhookUrl : base.alertWebhookUrl,
         accountConcurrency: num(raw.accountConcurrency, base.accountConcurrency),
+        proxyAutoDropFails: num(raw.proxyAutoDropFails, base.proxyAutoDropFails),
       };
     }
   } catch {
@@ -163,6 +167,8 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     alertWebhookUrl: typeof patch.alertWebhookUrl === 'string' ? patch.alertWebhookUrl : current.alertWebhookUrl,
     accountConcurrency:
       patch.accountConcurrency !== undefined ? num(patch.accountConcurrency, current.accountConcurrency) : current.accountConcurrency,
+    proxyAutoDropFails:
+      patch.proxyAutoDropFails !== undefined ? num(patch.proxyAutoDropFails, current.proxyAutoDropFails) : current.proxyAutoDropFails,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
