@@ -211,6 +211,14 @@
           </form>
           <div id="settingsMsg" class="msg"></div>
         </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Backup</h3><span class="hint">accounts · providers · scraper · settings (includes API keys)</span></div>
+          <div class="row">
+            <button class="btn" id="btnBackupExport">⬇ Export backup</button>
+            <label class="btn">⬆ Import backup<input type="file" id="backupFile" accept="application/json,.json" hidden></label>
+          </div>
+          <div id="backupMsg" class="msg"></div>
+        </div>
       </section>
 
       <section id="sec-events" class="sec">
