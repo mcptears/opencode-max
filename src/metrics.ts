@@ -158,6 +158,27 @@ export class Metrics {
     return this.events.slice(0, limit);
   }
 
+  /** Latest proxied requests, newest first (for the dashboard inspector). */
+  recentRequests(
+    limit = 50,
+    providerOf: (accountId: string) => string = () => '',
+  ): { t: number; accountId: string; provider: string; model: string | null; status: number; latencyMs: number }[] {
+    try {
+      const rows = getDb()
+        .prepare('SELECT ts AS t, account_id AS accountId, model, status, latency_ms AS latencyMs FROM request_log ORDER BY id DESC LIMIT ?')
+        .all(Math.min(200, Math.max(1, limit))) as unknown as {
+        t: number;
+        accountId: string;
+        model: string | null;
+        status: number;
+        latencyMs: number;
+      }[];
+      return rows.map((r) => ({ ...r, provider: providerOf(r.accountId) || 'unknown' }));
+    } catch {
+      return [];
+    }
+  }
+
   /** Per-model usage over the last N hours: requests, errors, avg latency. */
   modelStats(
     hours = 24,
