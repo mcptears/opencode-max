@@ -22,6 +22,9 @@ export interface Settings {
   /** Compress bloated tool_result payloads before forwarding (saves tokens). */
   tokenSaver: boolean;
   tokenSaverMaxChars: number;
+  /** Periodically re-scrape free proxy providers to keep the pool fresh. */
+  autoScrape: boolean;
+  autoScrapeIntervalHours: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -52,6 +55,8 @@ function fromEnv(): Settings {
     quota5hLimit: num(process.env.QUOTA_5H_LIMIT, 200),
     tokenSaver: bool(process.env.TOKEN_SAVER, true),
     tokenSaverMaxChars: num(process.env.TOKEN_SAVER_MAX_CHARS, 20000),
+    autoScrape: bool(process.env.AUTO_SCRAPE, false),
+    autoScrapeIntervalHours: num(process.env.AUTO_SCRAPE_INTERVAL_HOURS, 6),
   };
 }
 
@@ -85,6 +90,8 @@ let current: Settings = (() => {
         quota5hLimit: num(raw.quota5hLimit, base.quota5hLimit),
         tokenSaver: typeof raw.tokenSaver === 'boolean' ? raw.tokenSaver : base.tokenSaver,
         tokenSaverMaxChars: num(raw.tokenSaverMaxChars, base.tokenSaverMaxChars),
+        autoScrape: typeof raw.autoScrape === 'boolean' ? raw.autoScrape : base.autoScrape,
+        autoScrapeIntervalHours: num(raw.autoScrapeIntervalHours, base.autoScrapeIntervalHours),
       };
     }
   } catch {
@@ -125,6 +132,11 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     tokenSaver: typeof patch.tokenSaver === 'boolean' ? patch.tokenSaver : current.tokenSaver,
     tokenSaverMaxChars:
       patch.tokenSaverMaxChars !== undefined ? num(patch.tokenSaverMaxChars, current.tokenSaverMaxChars) : current.tokenSaverMaxChars,
+    autoScrape: typeof patch.autoScrape === 'boolean' ? patch.autoScrape : current.autoScrape,
+    autoScrapeIntervalHours:
+      patch.autoScrapeIntervalHours !== undefined
+        ? num(patch.autoScrapeIntervalHours, current.autoScrapeIntervalHours)
+        : current.autoScrapeIntervalHours,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
