@@ -54,6 +54,8 @@ export interface Settings {
   logMaxMb: number;
   /** Rotated log generations to keep. */
   logKeep: number;
+  /** Max wait for in-flight requests to finish on SIGTERM/SIGINT. */
+  shutdownDrainMs: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -100,6 +102,7 @@ function fromEnv(): Settings {
     logFile: (process.env.LOG_FILE ?? '').trim(),
     logMaxMb: num(process.env.LOG_MAX_MB, 10),
     logKeep: num(process.env.LOG_KEEP, 3),
+    shutdownDrainMs: num(process.env.SHUTDOWN_DRAIN_MS, 30_000),
   };
 }
 
@@ -216,6 +219,7 @@ let current: Settings = (() => {
         logFile: typeof raw.logFile === 'string' ? raw.logFile.trim() : base.logFile,
         logMaxMb: num(raw.logMaxMb, base.logMaxMb),
         logKeep: num(raw.logKeep, base.logKeep),
+        shutdownDrainMs: num(raw.shutdownDrainMs, base.shutdownDrainMs),
       };
     }
   } catch {
@@ -292,6 +296,8 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     logFile: typeof patch.logFile === 'string' ? patch.logFile.trim() : current.logFile,
     logMaxMb: patch.logMaxMb !== undefined ? num(patch.logMaxMb, current.logMaxMb) : current.logMaxMb,
     logKeep: patch.logKeep !== undefined ? num(patch.logKeep, current.logKeep) : current.logKeep,
+    shutdownDrainMs:
+      patch.shutdownDrainMs !== undefined ? num(patch.shutdownDrainMs, current.shutdownDrainMs) : current.shutdownDrainMs,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
