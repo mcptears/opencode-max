@@ -7,7 +7,8 @@ import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath } from './settings.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
-import { loadProviders, saveProviders, scrapeAll, testProxy, type ProviderFormat, type ScrapeResult } from './scraper.js';
+import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, scrapeAll, testProxy, type ProviderFormat, type ScrapeResult } from './scraper.js';
+import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
 
 export interface AdminContext {
   pool: AccountPool;
@@ -223,6 +224,125 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ ok: true });
   });
 
+  // ---- providers (multi-upstream, 9router-style) ----
+  router.get('/api/providers', (_req, res) => {
+    res.json({ providers: loadProviders() });
+  });
+
+  function validateProviderInput(body: unknown): { ok: true; provider: ProviderConfig } | { ok: false; error: string } {
+    const b = (body ?? {}) as Record<string, unknown>;
+    const id = typeof b.id === 'string' ? b.id.trim() : '';
+    const name = typeof b.name === 'string' ? b.name.trim() : '';
+    const baseUrl = typeof b.baseUrl === 'string' ? b.baseUrl.trim().replace(/\/+$/, '') : '';
+    const models = Array.isArray(b.models)
+      ? (b.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.trim().length > 0).map((m) => m.trim())
+      : [];
+    if (!id) return { ok: false, error: 'id is required' };
+    if (!/^[a-z0-9][a-z0-9-_]*$/i.test(id)) return { ok: false, error: 'id must be alphanumeric with dashes/underscores' };
+    if (!baseUrl) return { ok: false, error: 'baseUrl is required' };
+    try {
+      new URL(baseUrl);
+    } catch {
+      return { ok: false, error: 'baseUrl is not a valid URL' };
+    }
+    return { ok: true, provider: { id, name: name || id, baseUrl, models: models.length > 0 ? models : ['*'], enabled: b.enabled !== false } };
+  }
+
+  router.post('/api/providers', (req, res) => {
+    const v = validateProviderInput(jsonBody(req));
+    if (!v.ok) {
+      res.status(400).json({ error: { message: v.error, status: 400 } });
+      return;
+    }
+    const providers = loadProviders();
+    if (providers.some((p) => p.id === v.provider.id)) {
+      res.status(409).json({ error: { message: `provider '${v.provider.id}' already exists`, status: 409 } });
+      return;
+    }
+    providers.push(v.provider);
+    saveProviders(providers);
+    metrics.record('settings', `provider '${v.provider.id}' added`);
+    res.status(201).json({ ok: true });
+  });
+
+  router.put('/api/providers/:id', (req, res) => {
+    const v = validateProviderInput({ ...((jsonBody(req) ?? {}) as object), id: req.params.id });
+    if (!v.ok) {
+      res.status(400).json({ error: { message: v.error, status: 400 } });
+      return;
+    }
+    const providers = loadProviders();
+    const i = providers.findIndex((p) => p.id === req.params.id);
+    if (i < 0) {
+      res.status(404).json({ error: { message: 'provider not found', status: 404 } });
+      return;
+    }
+    providers[i] = v.provider;
+    saveProviders(providers);
+    metrics.record('settings', `provider '${v.provider.id}' updated`);
+    res.json({ ok: true });
+  });
+
+  router.delete('/api/providers/:id', (req, res) => {
+    const providers = loadProviders();
+    if (providers.length <= 1) {
+      res.status(400).json({ error: { message: 'cannot delete the last provider', status: 400 } });
+      return;
+    }
+    const next = providers.filter((p) => p.id !== req.params.id);
+    if (next.length === providers.length) {
+      res.status(404).json({ error: { message: 'provider not found', status: 404 } });
+      return;
+    }
+    saveProviders(next);
+    metrics.record('settings', `provider '${req.params.id}' removed`);
+    res.json({ ok: true });
+  });
+
+  /** One-click preset: self-hosted qwen2api (https://github.com/smanx/qwen2api). */
+  router.post('/api/providers/preset/qwen', (_req, res) => {
+    const providers = loadProviders();
+    if (providers.some((p) => p.id === QWEN_PRESET.id)) {
+      res.status(409).json({ error: { message: 'qwen provider already exists', status: 409 } });
+      return;
+    }
+    providers.push({ ...QWEN_PRESET });
+    saveProviders(providers);
+    metrics.record('settings', 'qwen (qwen2api) provider preset added');
+    res.status(201).json({ ok: true, provider: QWEN_PRESET });
+  });
+
+  /** Test a provider's /models endpoint (no keys leaked). */
+  router.post('/api/providers/:id/test', async (req, res) => {
+    const p = loadProviders().find((x) => x.id === req.params.id);
+    if (!p) {
+      res.status(404).json({ error: { message: 'provider not found', status: 404 } });
+      return;
+    }
+    try {
+      const account = pool.acquire(p.id);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        const r = await fetch(`${p.baseUrl}/models`, {
+          headers: account?.apiKey ? { authorization: `Bearer ${account.apiKey}` } : {},
+          dispatcher: rotator.dispatcherFor(rotator.current(), rotator.currentFamily()),
+          signal: controller.signal,
+        } as RequestInit & { dispatcher?: unknown });
+        if (!r.ok) {
+          res.json({ ok: false, error: `HTTP ${r.status}` });
+          return;
+        }
+        const j = (await r.json()) as { data?: unknown[] };
+        res.json({ ok: true, models: Array.isArray(j.data) ? j.data.length : 0 });
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (e) {
+      res.json({ ok: false, error: String(e).slice(0, 160) });
+    }
+  });
+
   // ---- proxies ----
   router.get('/api/proxies', (_req, res) => {
     const st = rotator.status();
@@ -268,7 +388,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   let scrapeJob: { running: boolean; result: ScrapeResult | null } = { running: false, result: null };
 
   router.get('/api/scraper/providers', (_req, res) => {
-    res.json({ providers: loadProviders() });
+    res.json({ providers: loadScraperProviders() });
   });
 
   router.post('/api/scraper/providers', (req, res) => {
@@ -289,17 +409,17 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       res.status(400).json({ error: { message: 'url is not valid', status: 400 } });
       return;
     }
-    const providers = loadProviders();
+    const providers = loadScraperProviders();
     const id = `custom-${Date.now().toString(36)}`;
     providers.push({ id, name, url, format, enabled: true });
-    saveProviders(providers);
+    saveScraperProviders(providers);
     metrics.record('proxy_added', `scraper provider '${name}' added`);
     res.status(201).json({ ok: true, id });
   });
 
   router.put('/api/scraper/providers/:id', (req, res) => {
     const body = jsonBody(req) as { name?: unknown; url?: unknown; format?: unknown; enabled?: unknown };
-    const providers = loadProviders();
+    const providers = loadScraperProviders();
     const p = providers.find((x) => x.id === req.params.id);
     if (!p) {
       res.status(404).json({ error: { message: 'provider not found', status: 404 } });
@@ -317,18 +437,18 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     }
     if (['text', 'geonode', 'spys', 'fpl', 'proxynova'].includes(body.format as string)) p.format = body.format as ProviderFormat;
     if (typeof body.enabled === 'boolean') p.enabled = body.enabled;
-    saveProviders(providers);
+    saveScraperProviders(providers);
     res.json({ ok: true });
   });
 
   router.delete('/api/scraper/providers/:id', (req, res) => {
-    const providers = loadProviders();
+    const providers = loadScraperProviders();
     const next = providers.filter((x) => x.id !== req.params.id);
     if (next.length === providers.length) {
       res.status(404).json({ error: { message: 'provider not found', status: 404 } });
       return;
     }
-    saveProviders(next);
+    saveScraperProviders(next);
     metrics.record('proxy_removed', `scraper provider '${req.params.id}' removed`);
     res.json({ ok: true });
   });
@@ -346,7 +466,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     metrics.record('settings', 'proxy scrape started');
     void (async () => {
       try {
-        const result = await scrapeAll(loadProviders());
+        const result = await scrapeAll(loadScraperProviders());
         const current = readProxies();
         const known = new Set(current);
         const fresh = result.working.filter((p) => !known.has(p));
