@@ -57,6 +57,67 @@ export function clientTokenAuth(req: express.Request, res: express.Response, nex
   res.status(401).json({ error: { message: 'missing or invalid client token', status: 401 } });
 }
 
+/**
+ * Permissive CORS for /v1/* so browser-based clients can call the proxy
+ * directly. The proxy binds to localhost, so this is same-trust as the user.
+ * Preflights are answered here; clientTokenAuth lets OPTIONS through too.
+ */
+export function corsV1(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+}
+
+/** Aggregate model lists from every enabled provider (deduplicated). */
+export async function aggregateModels(
+  pool: AccountPool,
+  rotator: IpRotator,
+  getProviders: () => ProviderConfig[],
+): Promise<unknown[]> {
+  const seen = new Set<string>();
+  const data: unknown[] = [];
+  for (const p of getProviders().filter((x) => x.enabled)) {
+    const account = pool.acquire(p.id);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        const r = await fetch(`${p.baseUrl}/models`, {
+          headers: account?.apiKey ? { authorization: `Bearer ${account.apiKey}` } : {},
+          dispatcher: rotator.dispatcherFor(rotator.current(), rotator.currentFamily()),
+          signal: controller.signal,
+        } as RequestInit & { dispatcher?: unknown });
+        if (!r.ok) continue;
+        const j = (await r.json()) as { data?: { id?: unknown }[] };
+        for (const m of j.data ?? []) {
+          const id = typeof m?.id === 'string' ? m.id : null;
+          if (id && !seen.has(id)) {
+            seen.add(id);
+            data.push(m);
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      /* provider unreachable — skip it, don't fail the whole list */
+    } finally {
+      // acquire() bumps the in-flight count — always pair it with release().
+      if (account) pool.release(account.id);
+    }
+  }
+  return data;
+}
+
+/** Upstream /models is hit at most once per TTL (dashboard edits land within a minute). */
+export const MODELS_CACHE_TTL_MS = 60_000;
+
 export function buildRouter(
   pool: AccountPool,
   rotator: IpRotator,
@@ -69,6 +130,7 @@ export function buildRouter(
   const router = Router();
   const upstream = new UpstreamClient(pool, rotator, sessions, metrics, quota, getProviders, alerter);
 
+  router.use('/v1', corsV1);
   router.use('/v1', clientTokenAuth);
 
   router.get('/health', (_req, res) => {
@@ -128,38 +190,16 @@ export function buildRouter(
     }
   };
 
-  /** Aggregate model lists from every enabled provider. */
+  /** Aggregated model list, cached briefly so every client poll doesn't fan out. */
+  let modelsCache: { at: number; data: unknown[] } | null = null;
   router.get('/v1/models', async (_req, res, next) => {
     try {
-      const seen = new Set<string>();
-      const data: unknown[] = [];
-      for (const p of getProviders().filter((x) => x.enabled)) {
-        try {
-          const account = pool.acquire(p.id);
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 15000);
-          try {
-            const r = await fetch(`${p.baseUrl}/models`, {
-              headers: account?.apiKey ? { authorization: `Bearer ${account.apiKey}` } : {},
-              dispatcher: rotator.dispatcherFor(rotator.current(), rotator.currentFamily()),
-              signal: controller.signal,
-            } as RequestInit & { dispatcher?: unknown });
-            if (!r.ok) continue;
-            const j = (await r.json()) as { data?: { id?: unknown }[] };
-            for (const m of j.data ?? []) {
-              const id = typeof m?.id === 'string' ? m.id : null;
-              if (id && !seen.has(id)) {
-                seen.add(id);
-                data.push(m);
-              }
-            }
-          } finally {
-            clearTimeout(timer);
-          }
-        } catch {
-          /* provider unreachable — skip it, don't fail the whole list */
-        }
+      if (modelsCache && Date.now() - modelsCache.at < MODELS_CACHE_TTL_MS) {
+        res.json({ object: 'list', data: modelsCache.data });
+        return;
       }
+      const data = await aggregateModels(pool, rotator, getProviders);
+      modelsCache = { at: Date.now(), data };
       res.json({ object: 'list', data });
     } catch (err) {
       next(err);
