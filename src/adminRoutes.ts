@@ -5,7 +5,7 @@ import type { AccountConfig } from './config.js';
 import type { IpRotator } from './ipRotator.js';
 import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
-import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks } from './settings.js';
+import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parseModelTimeouts } from './settings.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
@@ -524,6 +524,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (body.modelFallbacks !== undefined) {
       const clean = parseModelFallbacks(JSON.stringify(body.modelFallbacks));
       patch.modelFallbacks = clean;
+    }
+    if (body.modelTimeouts !== undefined) {
+      patch.modelTimeouts = parseModelTimeouts(JSON.stringify(body.modelTimeouts));
     }
     if (body.errorSpikeThreshold !== undefined) patch.errorSpikeThreshold = body.errorSpikeThreshold;
     if (body.errorSpikeWindowMin !== undefined) patch.errorSpikeWindowMin = body.errorSpikeWindowMin;
