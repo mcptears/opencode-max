@@ -222,3 +222,52 @@ describe('concurrency queue', () => {
     expect(pool.status()[0].inflight).toBe(0);
   });
 });
+
+describe('proxy quality scoring', () => {
+  it('tracks ok/fail counts and latency EMA', async () => {
+    const { IpRotator } = await import('../ipRotator.js');
+    const r = new IpRotator(['http://p1:8080', 'http://p2:8080']);
+    r.recordProxyResult('http://p1:8080', true, 100);
+    r.recordProxyResult('http://p1:8080', true, 200);
+    r.recordProxyResult('http://p1:8080', false, 0);
+    const q = r.qualityOf('http://p1:8080');
+    expect(q?.ok).toBe(2);
+    expect(q?.fail).toBe(1);
+    expect(q?.consecFails).toBe(1);
+    expect(q?.latencyEma).toBeGreaterThan(0);
+    // success resets consecutive failures
+    r.recordProxyResult('http://p1:8080', true, 100);
+    expect(r.qualityOf('http://p1:8080')?.consecFails).toBe(0);
+  });
+
+  it('auto-drops after the threshold but never the last proxy', async () => {
+    const { IpRotator } = await import('../ipRotator.js');
+    const { saveSettings } = await import('../settings.js');
+    saveSettings({ proxyAutoDropFails: 2 });
+    const dropped: string[] = [];
+    const r = new IpRotator(['http://p1:8080', 'http://p2:8080']);
+    r.onProxyDropped = (p) => dropped.push(p);
+    r.recordProxyResult('http://p1:8080', false, 0);
+    expect(r.count).toBe(2);
+    r.recordProxyResult('http://p1:8080', false, 0);
+    expect(r.count).toBe(1);
+    expect(dropped).toEqual(['http://p1:8080']);
+    expect(r.rawProxies()).toEqual(['http://p2:8080']);
+    // last proxy is never dropped
+    r.recordProxyResult('http://p2:8080', false, 0);
+    r.recordProxyResult('http://p2:8080', false, 0);
+    r.recordProxyResult('http://p2:8080', false, 0);
+    expect(r.count).toBe(1);
+    expect(dropped).toHaveLength(1);
+  });
+
+  it('does not auto-drop when disabled', async () => {
+    const { IpRotator } = await import('../ipRotator.js');
+    const { saveSettings } = await import('../settings.js');
+    saveSettings({ proxyAutoDropFails: 0 });
+    const r = new IpRotator(['http://p1:8080', 'http://p2:8080']);
+    for (let i = 0; i < 10; i++) r.recordProxyResult('http://p1:8080', false, 0);
+    expect(r.count).toBe(2);
+    saveSettings({ proxyAutoDropFails: 5 });
+  });
+});
