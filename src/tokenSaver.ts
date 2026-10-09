@@ -1,13 +1,18 @@
 /**
- * RTK-style token saver: compresses bloated tool_result payloads before they
- * reach upstream. Agentic loops routinely stuff tens of thousands of chars of
- * diffs/logs into tool results; this collapses blank runs, dedupes repeated
- * lines, and middle-truncates whatever is still oversized — keeping the head
- * and tail where the signal usually lives. Only tool-result content is ever
- * touched; everything else passes through byte-identical.
+ * Token saver: compresses bloated tool_result payloads before they reach
+ * upstream. Powered by the RTK engine (src/rtk.ts): each blob is
+ * auto-detected (git diff, grep hits, build logs, ls dumps…) and compressed
+ * with a content-aware filter instead of dumb truncation.
+ *
+ * `maxChars` stays a hard cap — anything still oversized after smart
+ * compression is middle-truncated, keeping head + tail where the signal
+ * usually lives. Only tool-result content is ever touched; everything else
+ * passes through byte-identical.
  *
  * Returns the number of characters removed (for metrics).
  */
+import { compressRtkText, RTK_MIN_COMPRESS_BYTES } from './rtk.js';
+
 export function compressToolResults(body: unknown, maxChars: number): number {
   if (maxChars <= 0 || typeof body !== 'object' || body === null) return 0;
   let saved = 0;
@@ -34,11 +39,12 @@ function compressMessage(msg: unknown, maxChars: number): number {
   }
 
   // Anthropic messages format: content blocks with type 'tool_result'
+  // (error traces are preserved untouched)
   if (Array.isArray(m.content)) {
     for (const block of m.content) {
       if (typeof block !== 'object' || block === null) continue;
-      const b = block as { type?: unknown; content?: unknown };
-      if (b.type === 'tool_result') {
+      const b = block as { type?: unknown; content?: unknown; is_error?: unknown };
+      if (b.type === 'tool_result' && b.is_error !== true) {
         const { text, saved: s } = compressContent(b.content, maxChars);
         if (s > 0) {
           b.content = text;
@@ -74,30 +80,13 @@ function compressContent(content: unknown, maxChars: number): { text: unknown; s
 }
 
 export function compressText(text: string, maxChars: number): { text: string; saved: number } {
-  if (text.length <= maxChars) return { text, saved: 0 };
+  if (text.length < RTK_MIN_COMPRESS_BYTES) return { text, saved: 0 };
 
-  // 1. Collapse runs of blank lines.
-  let t = text.replace(/\n{3,}/g, '\n\n');
+  // 1. Smart, content-aware compression.
+  const rtk = compressRtkText(text);
+  let t = rtk.text;
 
-  // 2. Collapse runs of identical consecutive lines (log spam).
-  const lines = t.split('\n');
-  const deduped: string[] = [];
-  let dupes = 0;
-  for (const line of lines) {
-    if (deduped.length > 0 && deduped[deduped.length - 1] === line) {
-      dupes += 1;
-      continue;
-    }
-    if (dupes > 0) {
-      deduped.push(`[… ${dupes} duplicate ${dupes === 1 ? 'line' : 'lines'} collapsed …]`);
-      dupes = 0;
-    }
-    deduped.push(line);
-  }
-  if (dupes > 0) deduped.push(`[… ${dupes} duplicate ${dupes === 1 ? 'line' : 'lines'} collapsed …]`);
-  t = deduped.join('\n');
-
-  // 3. Middle-truncate whatever is still oversized, keeping head + tail.
+  // 2. Hard cap: middle-truncate whatever is still oversized.
   if (t.length > maxChars) {
     const keep = Math.floor(maxChars * 0.35);
     const head = t.slice(0, keep);
