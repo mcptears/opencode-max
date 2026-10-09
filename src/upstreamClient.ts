@@ -57,6 +57,7 @@ import { trackUsage } from './usage.js';
 import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
 import type { Alerter } from './alerts.js';
+import { qwenChatCompletion, resolveQwenModel, QwenWebError } from './qwenWeb.js';
 
 /** Rewrite the model name inside a JSON request body (for model fallbacks). */
 function rewriteModel(bodyText: string | undefined, model: string | undefined): string | undefined {
@@ -268,13 +269,7 @@ export class UpstreamClient {
         const onAbort = (): void => controller.abort();
         req.signal?.addEventListener('abort', onAbort, { once: true });
         try {
-          upstream = await fetch(url, {
-            method: req.method,
-            headers,
-            body,
-            dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
-            signal: controller.signal,
-          } as RequestInit & { dispatcher?: unknown });
+          upstream = await this.fetchUpstream(req, providerId, account, model, proxy, url, headers, body, controller.signal);
         } finally {
           clearTimeout(timer);
           req.signal?.removeEventListener('abort', onAbort);
@@ -353,6 +348,88 @@ export class UpstreamClient {
     this.metrics?.logRequest(lastAccountId || 'none', 502, Date.now() - startedAt, model);
     this.pool.release(lastAccountId);
     throw new ProviderExhaustedError(`'${providerId}' unreachable after ${maxRetries + 1} attempts: ${String(lastError)}`);
+  }
+
+  /**
+   * Execute the upstream fetch. Providers with protocol 'qwen-web' are served
+   * by the native Qwen web client (built into opencode-max); everything else
+   * is a plain OpenAI-compatible passthrough. Qwen protocol errors are
+   * converted to Responses so the standard dead-key / 429 / retry machinery
+   * below applies unchanged.
+   */
+  private async fetchUpstream(
+    req: ForwardRequest,
+    providerId: string,
+    account: AccountConfig,
+    model: string | undefined,
+    proxy: string | null,
+    url: string,
+    headers: Record<string, string | string[] | undefined>,
+    body: string | undefined,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    const provider = this.getProviders().find((p) => p.id === providerId);
+    if (provider?.protocol === 'qwen-web') {
+      return this.fetchQwenWeb(req, provider, account, model, proxy, signal, body);
+    }
+    return fetch(url, {
+      method: req.method,
+      headers,
+      body,
+      dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
+      signal,
+    } as RequestInit & { dispatcher?: unknown });
+  }
+
+  private async fetchQwenWeb(
+    req: ForwardRequest,
+    provider: ProviderConfig,
+    account: AccountConfig,
+    model: string | undefined,
+    proxy: string | null,
+    signal: AbortSignal,
+    body: string | undefined,
+  ): Promise<Response> {
+    const qwenError = (status: number, message: string): Response =>
+      new Response(JSON.stringify({ error: { message, type: 'qwen_web_error' } }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+    if (req.method !== 'POST' || req.path !== '/chat/completions') {
+      return qwenError(404, 'qwen-web provider only serves POST /chat/completions');
+    }
+    if (!account.apiKey) {
+      return qwenError(503, `no Qwen account configured on '${provider.id}' — connect one from the dashboard`);
+    }
+    let parsed: { model?: string; messages?: { role?: string; content?: unknown }[]; stream?: boolean };
+    try {
+      parsed = JSON.parse(body ?? '');
+    } catch {
+      return qwenError(400, 'request body must be JSON');
+    }
+    const qwenOpts = provider.qwen ?? { defaultModel: 'qwen3.7-plus' };
+    const qwenModel = resolveQwenModel(qwenOpts.modelMap, qwenOpts.defaultModel, parsed.model ?? model);
+    const base = this.resolveBaseUrl(account);
+    try {
+      const stream = await qwenChatCompletion({
+        baseUrl: base,
+        credential: account.apiKey,
+        model: qwenModel,
+        messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+        stream: parsed.stream !== false,
+        responseModel: parsed.model ?? model,
+        signal,
+        dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
+      });
+      // Report the *requested* model name so clients see what they asked for.
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': parsed.stream !== false ? 'text/event-stream' : 'application/json' },
+      });
+    } catch (e) {
+      if (e instanceof QwenWebError) return qwenError(e.status, e.message);
+      throw e; // network-level: retry with backoff like any other provider
+    }
   }
 
   private toResult(upstream: Response): ForwardResult {
