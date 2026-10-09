@@ -48,6 +48,12 @@ export interface Settings {
   clientTokens: string[];
   /** Per-model upstream timeouts in ms: exact name or glob pattern → timeout. */
   modelTimeouts: Record<string, number>;
+  /** Mirror console output to this file (empty = stdout only). */
+  logFile: string;
+  /** Rotate the log file after this many MB. */
+  logMaxMb: number;
+  /** Rotated log generations to keep. */
+  logKeep: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -91,6 +97,9 @@ function fromEnv(): Settings {
     errorSpikeMinRequests: num(process.env.ERROR_SPIKE_MIN_REQUESTS, 10),
     clientTokens: (process.env.CLIENT_TOKENS ?? '').split(',').map((t) => t.trim()).filter(Boolean),
     modelTimeouts: parseModelTimeouts(process.env.MODEL_TIMEOUTS),
+    logFile: (process.env.LOG_FILE ?? '').trim(),
+    logMaxMb: num(process.env.LOG_MAX_MB, 10),
+    logKeep: num(process.env.LOG_KEEP, 3),
   };
 }
 
@@ -204,6 +213,9 @@ let current: Settings = (() => {
           raw.modelTimeouts && typeof raw.modelTimeouts === 'object'
             ? parseModelTimeouts(JSON.stringify(raw.modelTimeouts))
             : base.modelTimeouts,
+        logFile: typeof raw.logFile === 'string' ? raw.logFile.trim() : base.logFile,
+        logMaxMb: num(raw.logMaxMb, base.logMaxMb),
+        logKeep: num(raw.logKeep, base.logKeep),
       };
     }
   } catch {
@@ -277,6 +289,9 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       patch.modelTimeouts && typeof patch.modelTimeouts === 'object'
         ? parseModelTimeouts(JSON.stringify(patch.modelTimeouts))
         : current.modelTimeouts,
+    logFile: typeof patch.logFile === 'string' ? patch.logFile.trim() : current.logFile,
+    logMaxMb: patch.logMaxMb !== undefined ? num(patch.logMaxMb, current.logMaxMb) : current.logMaxMb,
+    logKeep: patch.logKeep !== undefined ? num(patch.logKeep, current.logKeep) : current.logKeep,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
