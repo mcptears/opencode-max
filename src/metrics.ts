@@ -246,6 +246,65 @@ export class Metrics {
     }
   }
 
+  /** Per-provider health over the last N hours: volume, success rate, latency, last error. */
+  providerHealth(
+    hours = 24,
+    providerOf: (accountId: string) => string = () => '',
+  ): {
+    provider: string;
+    requests: number;
+    errors: number;
+    successRate: number;
+    avgLatencyMs: number;
+    lastErrorStatus: number | null;
+    lastErrorAt: number | null;
+  }[] {
+    try {
+      const since = Date.now() - hours * 3600_000;
+      const rows = getDb()
+        .prepare(
+          `SELECT account_id AS accountId, status, latency_ms AS latencyMs, ts
+           FROM request_log WHERE ts > ? ORDER BY ts DESC LIMIT 20000`,
+        )
+        .all(since) as unknown as { accountId: string; status: number; latencyMs: number; ts: number }[];
+      const byProvider = new Map<
+        string,
+        { requests: number; errors: number; latencySum: number; lastErrorStatus: number | null; lastErrorAt: number | null }
+      >();
+      for (const r of rows) {
+        const p = providerOf(r.accountId) || 'unknown';
+        let agg = byProvider.get(p);
+        if (!agg) {
+          agg = { requests: 0, errors: 0, latencySum: 0, lastErrorStatus: null, lastErrorAt: null };
+          byProvider.set(p, agg);
+        }
+        agg.requests++;
+        agg.latencySum += r.latencyMs ?? 0;
+        if (r.status >= 400) {
+          agg.errors++;
+          // Rows are newest-first, so the first error seen is the most recent.
+          if (agg.lastErrorAt === null) {
+            agg.lastErrorStatus = r.status;
+            agg.lastErrorAt = r.ts;
+          }
+        }
+      }
+      return [...byProvider.entries()]
+        .map(([provider, a]) => ({
+          provider,
+          requests: a.requests,
+          errors: a.errors,
+          successRate: a.requests ? Math.round(((a.requests - a.errors) / a.requests) * 1000) / 10 : 100,
+          avgLatencyMs: Math.round(a.latencySum / Math.max(1, a.requests)),
+          lastErrorStatus: a.lastErrorStatus,
+          lastErrorAt: a.lastErrorAt,
+        }))
+        .sort((x, y) => y.requests - x.requests);
+    } catch {
+      return [];
+    }
+  }
+
   /** Token totals over the last N hours, per account and per model. */
   usageStats(hours = 24): {
     byAccount: { accountId: string; prompt: number; completion: number; total: number; requests: number }[];
