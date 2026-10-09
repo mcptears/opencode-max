@@ -7,14 +7,16 @@ import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath } from './settings.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
-import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, scrapeAll, testProxy, type ProviderFormat, type ScrapeResult } from './scraper.js';
+import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
+import type { ScraperJob } from './scraperJob.js';
 
 export interface AdminContext {
   pool: AccountPool;
   rotator: IpRotator;
   sessions: SessionManager;
   metrics: Metrics;
+  scraper: ScraperJob;
 }
 
 function validateAccount(a: unknown): { ok: true; account: AccountConfig } | { ok: false; error: string } {
@@ -385,10 +387,20 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   });
 
   // ---- proxy scraper ----
-  let scrapeJob: { running: boolean; result: ScrapeResult | null } = { running: false, result: null };
-
   router.get('/api/scraper/providers', (_req, res) => {
     res.json({ providers: loadScraperProviders() });
+  });
+
+  router.get('/api/scraper/status', (_req, res) => {
+    res.json(ctx.scraper.status());
+  });
+
+  router.post('/api/scraper/run', (_req, res) => {
+    if (!ctx.scraper.start(false)) {
+      res.status(409).json({ error: { message: 'a scrape is already running', status: 409 } });
+      return;
+    }
+    res.status(202).json({ ok: true, started: true });
   });
 
   router.post('/api/scraper/providers', (req, res) => {
@@ -451,41 +463,6 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     saveScraperProviders(next);
     metrics.record('proxy_removed', `scraper provider '${req.params.id}' removed`);
     res.json({ ok: true });
-  });
-
-  router.get('/api/scraper/status', (_req, res) => {
-    res.json({ running: scrapeJob.running, result: scrapeJob.result });
-  });
-
-  router.post('/api/scraper/run', (_req, res) => {
-    if (scrapeJob.running) {
-      res.status(409).json({ error: { message: 'a scrape is already running', status: 409 } });
-      return;
-    }
-    scrapeJob = { running: true, result: null };
-    metrics.record('settings', 'proxy scrape started');
-    void (async () => {
-      try {
-        const result = await scrapeAll(loadScraperProviders());
-        const current = readProxies();
-        const known = new Set(current);
-        const fresh = result.working.filter((p) => !known.has(p));
-        if (fresh.length > 0) {
-          const next = [...current, ...fresh];
-          writeProxies(next);
-          rotator.setProxies(next);
-        }
-        scrapeJob = { running: false, result };
-        metrics.record(
-          'proxy_added',
-          `proxy scrape finished: ${result.working.length} working of ${result.tested} tested (${fresh.length} new)`,
-        );
-      } catch (e) {
-        scrapeJob = { running: false, result: null };
-        metrics.record('error', `proxy scrape failed: ${String(e).slice(0, 120)}`);
-      }
-    })();
-    res.status(202).json({ ok: true, started: true });
   });
 
   // ---- settings ----
