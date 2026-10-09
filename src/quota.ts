@@ -37,12 +37,18 @@ export class QuotaTracker {
     return getSettings().quota5hLimit;
   }
 
-  isOverQuota(accountId: string): boolean {
-    return this.usage(accountId) >= this.limit();
+  /** Effective limit for an account: per-account override wins over the global. */
+  limitFor(accountQuotaLimit?: number): number {
+    return typeof accountQuotaLimit === 'number' && accountQuotaLimit > 0 ? accountQuotaLimit : this.limit();
   }
 
-  isNearQuota(accountId: string): boolean {
-    return this.usage(accountId) >= this.limit() * 0.9;
+  isOverQuota(accountId: string, accountQuotaLimit?: number): boolean {
+    return this.usage(accountId) >= this.limitFor(accountQuotaLimit);
+  }
+
+  isNearQuota(accountId: string, accountQuotaLimit?: number): boolean {
+    const limit = this.limitFor(accountQuotaLimit);
+    return this.usage(accountId) >= limit * 0.9;
   }
 
   /** Drop events older than the retention window. Called periodically. */
