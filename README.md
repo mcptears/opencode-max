@@ -156,7 +156,9 @@ POST   /api/providers/:id/test     # live /models check
 Qwen runs **natively inside opencode-max** — it speaks Qwen's web API directly, so there's nothing else to deploy:
 
 1. In the dashboard, hit **Add Qwen provider** (or `POST /api/providers/preset/qwen`). Already have the old self-hosted entry? The same button upgrades it in place — your accounts keep working.
-2. Hit **Connect Qwen account**: sign in at `chat.qwen.ai`, run `localStorage.getItem("token")` in DevTools, paste the token. It's validated live before anything is saved. A full `Cookie` header works too.
+2. Hit **Connect Qwen account** and pick a tab:
+   - **Sign in** — your Qwen email + password, the same login as `chat.qwen.ai`. The password is SHA-256 hashed in your browser and never stored; only the Qwen session token lands in the account pool.
+   - **Paste token** — for accounts without a password (e.g. Google/GitHub SSO): sign in at `chat.qwen.ai`, run `localStorage.getItem("token")` in DevTools, paste the token. It's validated live before anything is saved.
 3. Ask for a Qwen model — `qwen-max`, `qwen-plus`, `qwen-coder`, … — and it routes there, with the same proxy rotation, retries, quota tracking and session handling as Zen.
 
 Each request runs in a disposable upstream chat (created, used, deleted), so your Qwen account doesn't fill up with chats. Thinking phases stream back as `reasoning_content`. The provider's Qwen web model id and the friendly-name → model-id map are editable in the provider settings. Qwen risk-control responses park the account in cooldown automatically instead of burning it.
