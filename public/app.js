@@ -117,7 +117,7 @@ function renderStatus(s) {
   const fmtTokens = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0);
   const cards = [
     ['Requests', m.requests], ['Succeeded', m.successes], ['Rate limited', m.rateLimited],
-    ['IP rotations', m.rotations], ['Retries', m.retries], ['Tokens saved', fmtTokens(m.tokensSaved)],
+    ['IP rotations', m.rotations], ['Retries', m.retries], ['Failovers', m.failovers || 0], ['Tokens saved', fmtTokens(m.tokensSaved)],
     ['Uptime', `${Math.floor(m.uptimeSec / 60)}<small> min</small>`],
   ];
   $('#statCards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
@@ -187,12 +187,13 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
     if (f.egressFamily && settings.egressFamily) f.egressFamily.value = settings.egressFamily;
     if (f.tokenSaver) f.tokenSaver.checked = settings.tokenSaver !== false;
+    if (f.autoScrape) f.autoScrape.checked = settings.autoScrape === true;
   } catch { /* ignore */ }
 }
 
@@ -267,7 +268,7 @@ document.querySelectorAll('[data-ptab]').forEach((btn) => {
   btn.onclick = () => {
     document.querySelectorAll('[data-ptab]').forEach((b) => b.classList.toggle('on', b === btn));
     document.querySelectorAll('.ptab').forEach((p) => { p.hidden = p.id !== 'ptab-' + btn.dataset.ptab; });
-    if (btn.dataset.ptab === 'scraper') loadProviders();
+    if (btn.dataset.ptab === 'scraper') { loadProviders(); refreshScrapeStatus(); }
   };
 });
 
@@ -333,6 +334,18 @@ $('#providerForm').onsubmit = async (e) => {
 };
 
 let scrapeTimer = null;
+// Show last scrape info when opening the tab.
+async function refreshScrapeStatus() {
+  try {
+    const s = await (await api('/api/scraper/status')).json();
+    if (s.running) { $('#scrapeStatus').textContent = 'scraping…'; return; }
+    if (s.lastRunAt) {
+      const ago = Math.max(0, Math.round((Date.now() - s.lastRunAt) / 60000));
+      const when = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ${ago % 60}m ago`;
+      $('#scrapeStatus').textContent = `last run ${when}${s.lastRunAuto ? ' (scheduled)' : ''}${s.result ? ` — ${s.result.working.length} working` : ''}`;
+    }
+  } catch { /* ignore */ }
+}
 $('#scrapeBtn').onclick = async () => {
   const r = await api('/api/scraper/run', { method: 'POST' });
   if (!r.ok) { $('#scrapeStatus').textContent = 'already running'; return; }
@@ -367,11 +380,12 @@ $('#scrapeBtn').onclick = async () => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
   body.tokenSaver = !!f.tokenSaver.checked;
+  body.autoScrape = !!f.autoScrape.checked;
   if (f.egressFamily && f.egressFamily.value) body.egressFamily = f.egressFamily.value;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
