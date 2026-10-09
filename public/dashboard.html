@@ -14,6 +14,7 @@
     <nav>
       <button data-sec="overview" class="active"><span class="ic">📊</span>Overview</button>
       <button data-sec="accounts"><span class="ic">🔑</span>Accounts</button>
+      <button data-sec="providers"><span class="ic">🔌</span>Providers</button>
       <button data-sec="proxies"><span class="ic">🌐</span>Proxies</button>
       <button data-sec="settings"><span class="ic">⚙️</span>Settings</button>
       <button data-sec="events"><span class="ic">📝</span>Events</button>
@@ -53,6 +54,15 @@
             <button class="btn primary" id="connectBtn">Connect OpenCode account</button>
             <span class="hint">no JSON editing — get a link, sign in anywhere, paste the key</span>
           </div>
+          <h4 class="sub">Add manually <span class="hint">for other providers / API tokens</span></h4>
+          <form id="accountForm" class="form-grid">
+            <input name="name" placeholder="display name" required>
+            <select name="provider" id="accountProvider"></select>
+            <input name="apiKey" type="password" placeholder="API key (empty = keyless provider)" autocomplete="off">
+            <input name="priority" type="number" min="1" value="1" placeholder="priority">
+            <button class="btn primary" type="submit">Add account</button>
+          </form>
+          <div id="accountMsg" class="hint"></div>
         </div>
       </section>
 
@@ -84,6 +94,25 @@
           </div>
         </div>
       </div>
+
+      <section id="sec-providers" class="sec">
+        <div class="panel">
+          <div class="panel-head"><h3>Providers</h3><span class="hint">OpenAI-compatible upstreams — requests route by model name</span></div>
+          <ul class="plist" id="providerUpList"></ul>
+          <h4 class="sub">Add provider</h4>
+          <form id="providerForm" class="form-grid">
+            <input name="id" placeholder="id · e.g. qwen" required pattern="[A-Za-z0-9][A-Za-z0-9-_]*">
+            <input name="name" placeholder="display name · e.g. Qwen">
+            <input name="baseUrl" placeholder="base URL · e.g. http://127.0.0.1:8765/v1" required style="grid-column:span 2">
+            <input name="models" placeholder="model globs, comma-separated · e.g. qwen*" style="grid-column:span 2">
+            <button class="btn primary" type="submit">Add provider</button>
+          </form>
+          <h4 class="sub">Qwen via qwen2api <span class="hint">free Qwen chat as an OpenAI-compatible API</span></h4>
+          <p class="hint">Deploy <a href="https://github.com/smanx/qwen2api" target="_blank" rel="noopener">smanx/qwen2api</a> yourself (Docker, Vercel, Netlify or Cloudflare Workers — see its README), listening on port 8765. No API key needed unless you set <code>API_TOKENS</code> on it. Then:</p>
+          <div><button class="btn primary" id="qwenPresetBtn">Add Qwen (qwen2api) provider</button></div>
+          <div id="providerMsg" class="hint"></div>
+        </div>
+      </section>
 
       <section id="sec-proxies" class="sec">
         <div class="panel">
