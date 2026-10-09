@@ -507,6 +507,12 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (body.egressFamily === 'auto' || body.egressFamily === '4' || body.egressFamily === '6') {
       patch.egressFamily = body.egressFamily;
     }
+    if (typeof body.autoScrape === 'boolean') patch.autoScrape = body.autoScrape;
+    if (body.autoScrapeIntervalHours !== undefined) patch.autoScrapeIntervalHours = body.autoScrapeIntervalHours;
+    if (body.routingStrategy === 'priority' || body.routingStrategy === 'latency') patch.routingStrategy = body.routingStrategy;
+    if (body.queueMaxWaitMs !== undefined) patch.queueMaxWaitMs = body.queueMaxWaitMs;
+    if (typeof body.alertWebhookUrl === 'string' && body.alertWebhookUrl) patch.alertWebhookUrl = body.alertWebhookUrl;
+    if (body.accountConcurrency !== undefined) patch.accountConcurrency = body.accountConcurrency;
     // Port changes are saved but only take effect after a restart.
     const portChanged = body.port !== undefined && Number(body.port) !== getSettings().port;
     if (body.port !== undefined) patch.port = body.port;
