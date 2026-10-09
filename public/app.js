@@ -216,7 +216,7 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails', 'errorSpikeThreshold', 'errorSpikeWindowMin', 'errorSpikeMinRequests']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
@@ -439,7 +439,7 @@ $('#scrapeBtn').onclick = async () => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails', 'errorSpikeThreshold', 'errorSpikeWindowMin', 'errorSpikeMinRequests']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
