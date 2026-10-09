@@ -8,11 +8,20 @@ import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import type { QuotaTracker } from './quota.js';
 import { UpstreamClient } from './upstreamClient.js';
+import type { Alerter } from './alerts.js';
 import { matchProvider, defaultProvider, type ProviderConfig } from './providers.js';
 
-function abortOnClientClose(req: express.Request): AbortSignal {
+/**
+ * Abort the upstream fetch if the client goes away mid-request.
+ * NB: req 'close' fires when the request body is consumed (not on disconnect),
+ * so we watch the RESPONSE: 'close' with !writableFinished means the client
+ * disconnected before we finished sending.
+ */
+function abortOnClientClose(res: express.Response): AbortSignal {
   const controller = new AbortController();
-  req.on('close', () => controller.abort());
+  res.on('close', () => {
+    if (!res.writableFinished) controller.abort();
+  });
   return controller.signal;
 }
 
@@ -38,9 +47,10 @@ export function buildRouter(
   metrics?: Metrics,
   quota?: QuotaTracker,
   getProviders: () => ProviderConfig[] = () => [],
+  alerter?: Alerter,
 ): Router {
   const router = Router();
-  const upstream = new UpstreamClient(pool, rotator, sessions, metrics, quota, getProviders);
+  const upstream = new UpstreamClient(pool, rotator, sessions, metrics, quota, getProviders, alerter);
 
   router.get('/health', (_req, res) => {
     res.json({
@@ -84,11 +94,14 @@ export function buildRouter(
         provider: provider.id,
         // Providers like a self-hosted qwen2api need no API key at all.
         allowAnonymous: true,
-        signal: abortOnClientClose(req),
+        signal: abortOnClientClose(res),
       });
 
       res.status(result.status);
       for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, v);
+      const __tSend = Date.now();
+      res.on('finish', () => {
+      });
       if (result.body) {
         Readable.fromWeb(result.body as unknown as NodeWebStream).pipe(res);
       } else {
