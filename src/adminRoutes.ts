@@ -338,7 +338,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ ok: true });
   });
 
-  /** One-click preset: self-hosted qwen2api (https://github.com/smanx/qwen2api). */
+  /** One-click preset: self-hosted qwen2api. */
   router.post('/api/providers/preset/qwen', (_req, res) => {
     const providers = loadProviders();
     if (providers.some((p) => p.id === QWEN_PRESET.id)) {
