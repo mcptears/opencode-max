@@ -63,6 +63,11 @@ export class AccountPool {
     return usable[0] ?? null;
   }
 
+  /** Number of configured accounts, optionally filtered by provider. */
+  count(provider?: string): number {
+    return provider ? this.accounts.filter((a) => a.provider === provider).length : this.accounts.length;
+  }
+
   /** Park an account after a 429/quota hit. */
   markLimited(id: string, cooldownMs?: number): void {
     const acc = this.accounts.find((a) => a.id === id);
