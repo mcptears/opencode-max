@@ -8,6 +8,7 @@ import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parseModelTimeouts } from './settings.js';
 import { reinitFileLogger } from './logger.js';
 import { renderPrometheus } from './prometheus.js';
+import { validateQwenCredential } from './qwenWeb.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
@@ -146,6 +147,22 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   router.get('/api/accounts', (_req, res) => {
     // Never leak keys: return status view only.
     res.json({ accounts: pool.status() });
+  });
+
+  /** Validate a Qwen web credential (token or cookie) without adding it. */
+  router.post('/api/accounts/validate-qwen', async (req, res) => {
+    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown };
+    const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+    if (!credential) {
+      res.status(400).json({ ok: false, error: 'credential is required' });
+      return;
+    }
+    const base =
+      typeof body.baseUrl === 'string' && body.baseUrl.trim()
+        ? body.baseUrl.trim().replace(/\/+$/, '')
+        : (loadProviders().find((p) => p.protocol === 'qwen-web')?.baseUrl ?? 'https://chat.qwen.ai');
+    const r = await validateQwenCredential(base, credential);
+    res.json(r);
   });
 
   /** Check an API key against upstream without adding it (Connect flow).
@@ -297,7 +314,22 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     } catch {
       return { ok: false, error: 'baseUrl is not a valid URL' };
     }
-    return { ok: true, provider: { id, name: name || id, baseUrl, models: models.length > 0 ? models : ['*'], enabled: b.enabled !== false } };
+    const provider: ProviderConfig = { id, name: name || id, baseUrl, models: models.length > 0 ? models : ['*'], enabled: b.enabled !== false };
+    if (b.protocol === 'qwen-web') {
+      const q = (b.qwen ?? {}) as Record<string, unknown>;
+      const modelMap: Record<string, string> = {};
+      if (q.modelMap && typeof q.modelMap === 'object') {
+        for (const [k, v] of Object.entries(q.modelMap as Record<string, unknown>)) {
+          if (typeof v === 'string' && v.trim()) modelMap[k] = v.trim();
+        }
+      }
+      provider.protocol = 'qwen-web';
+      provider.qwen = {
+        defaultModel: typeof q.defaultModel === 'string' && q.defaultModel.trim() ? q.defaultModel.trim() : 'qwen3.7-plus',
+        ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
+      };
+    }
+    return { ok: true, provider };
   }
 
   router.post('/api/providers', (req, res) => {
@@ -351,16 +383,27 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ ok: true });
   });
 
-  /** One-click preset: self-hosted qwen2api. */
+  /** One-click preset: native Qwen web provider (built into opencode-max). */
   router.post('/api/providers/preset/qwen', (_req, res) => {
     const providers = loadProviders();
-    if (providers.some((p) => p.id === QWEN_PRESET.id)) {
-      res.status(409).json({ error: { message: 'qwen provider already exists', status: 409 } });
+    const existing = providers.find((p) => p.id === QWEN_PRESET.id);
+    if (existing) {
+      // Upgrade path: replace a legacy self-hosted qwen2api entry (127.0.0.1:8765)
+      // with the native provider. Accounts keep working (same provider id).
+      if (!existing.baseUrl.includes('8765')) {
+        res.status(409).json({ error: { message: 'qwen provider already exists', status: 409 } });
+        return;
+      }
+      const i = providers.indexOf(existing);
+      providers[i] = { ...QWEN_PRESET };
+      saveProviders(providers);
+      metrics.record('settings', 'qwen provider upgraded to native qwen-web');
+      res.json({ ok: true, upgraded: true, provider: QWEN_PRESET });
       return;
     }
     providers.push({ ...QWEN_PRESET });
     saveProviders(providers);
-    metrics.record('settings', 'qwen (qwen2api) provider preset added');
+    metrics.record('settings', 'native qwen provider preset added');
     res.status(201).json({ ok: true, provider: QWEN_PRESET });
   });
 
@@ -373,6 +416,17 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     }
     try {
       const account = pool.acquire(p.id);
+      // qwen-web has no /models endpoint — test the first account's credential instead.
+      if (p.protocol === 'qwen-web') {
+        if (account) pool.release(account.id);
+        if (!account?.apiKey) {
+          res.json({ ok: false, error: 'no Qwen account connected — use Connect Qwen account' });
+          return;
+        }
+        const v = await validateQwenCredential(p.baseUrl, account.apiKey);
+        res.json(v.ok ? { ok: true, models: Object.keys(p.qwen?.modelMap ?? {}).length + 1 } : { ok: false, error: v.error });
+        return;
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       try {
