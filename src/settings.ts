@@ -35,6 +35,8 @@ export interface Settings {
   accountConcurrency: number;
   /** Consecutive real-request failures before a proxy is auto-dropped (0 = off). */
   proxyAutoDropFails: number;
+  /** Model fallback chains: when a model is exhausted everywhere, try these in order. */
+  modelFallbacks: Record<string, string[]>;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -72,11 +74,31 @@ function fromEnv(): Settings {
     alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? '',
     accountConcurrency: num(process.env.ACCOUNT_CONCURRENCY, 4),
     proxyAutoDropFails: num(process.env.PROXY_AUTO_DROP_FAILS, 5),
+    modelFallbacks: parseModelFallbacks(process.env.MODEL_FALLBACKS),
   };
 }
 
 function parseRoutingStrategy(v: string | undefined): 'priority' | 'latency' {
   return (v ?? '').toLowerCase() === 'latency' ? 'latency' : 'priority';
+}
+
+/** Validate/normalize the MODEL_FALLBACKS JSON map (model -> [fallback models]). */
+export function parseModelFallbacks(v: string | undefined): Record<string, string[]> {
+  if (!v) return {};
+  try {
+    const raw = JSON.parse(v) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, list] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof k === 'string' && Array.isArray(list)) {
+        const models = list.filter((m): m is string => typeof m === 'string' && m.length > 0);
+        if (models.length > 0) out[k] = models;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 function parseEgressFamily(v: string | undefined): 'auto' | '4' | '6' {
@@ -116,6 +138,10 @@ let current: Settings = (() => {
         alertWebhookUrl: typeof raw.alertWebhookUrl === 'string' ? raw.alertWebhookUrl : base.alertWebhookUrl,
         accountConcurrency: num(raw.accountConcurrency, base.accountConcurrency),
         proxyAutoDropFails: num(raw.proxyAutoDropFails, base.proxyAutoDropFails),
+        modelFallbacks:
+          raw.modelFallbacks && typeof raw.modelFallbacks === 'object' && !Array.isArray(raw.modelFallbacks)
+            ? (raw.modelFallbacks as Record<string, string[]>)
+            : base.modelFallbacks,
       };
     }
   } catch {
@@ -169,6 +195,10 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       patch.accountConcurrency !== undefined ? num(patch.accountConcurrency, current.accountConcurrency) : current.accountConcurrency,
     proxyAutoDropFails:
       patch.proxyAutoDropFails !== undefined ? num(patch.proxyAutoDropFails, current.proxyAutoDropFails) : current.proxyAutoDropFails,
+    modelFallbacks:
+      patch.modelFallbacks && typeof patch.modelFallbacks === 'object' && !Array.isArray(patch.modelFallbacks)
+        ? patch.modelFallbacks
+        : current.modelFallbacks,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
