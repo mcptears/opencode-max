@@ -139,3 +139,18 @@ describe('modelStats', () => {
     expect(gpt?.requests).toBe(1);
   });
 });
+
+describe('recentRequests', () => {
+  it('returns newest-first request rows with provider mapping', () => {
+    const metrics = new Metrics();
+    metrics.logRequest('zz1', 200, 100, 'mm1');
+    metrics.logRequest('zz2', 500, 200, 'mm2');
+    const rows = metrics.recentRequests(10, (id) => (id === 'zz1' ? 'zen' : id === 'zz2' ? 'qwen' : ''));
+    const zz = rows.filter((r) => r.accountId === 'zz1' || r.accountId === 'zz2');
+    expect(zz).toHaveLength(2);
+    expect(zz[0].accountId).toBe('zz2'); // newest first
+    expect(zz[0].provider).toBe('qwen');
+    expect(zz[0].status).toBe(500);
+    expect(zz[1].provider).toBe('zen');
+  });
+});
