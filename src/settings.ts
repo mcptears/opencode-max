@@ -37,6 +37,12 @@ export interface Settings {
   proxyAutoDropFails: number;
   /** Model fallback chains: when a model is exhausted everywhere, try these in order. */
   modelFallbacks: Record<string, string[]>;
+  /** Error-spike alerts: webhook when the recent error rate exceeds this (0-1). */
+  errorSpikeThreshold: number;
+  /** Window (minutes) over which the error rate is measured. */
+  errorSpikeWindowMin: number;
+  /** Minimum requests in the window before a spike can trigger. */
+  errorSpikeMinRequests: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -75,6 +81,9 @@ function fromEnv(): Settings {
     accountConcurrency: num(process.env.ACCOUNT_CONCURRENCY, 4),
     proxyAutoDropFails: num(process.env.PROXY_AUTO_DROP_FAILS, 5),
     modelFallbacks: parseModelFallbacks(process.env.MODEL_FALLBACKS),
+    errorSpikeThreshold: num(process.env.ERROR_SPIKE_THRESHOLD, 0.5),
+    errorSpikeWindowMin: num(process.env.ERROR_SPIKE_WINDOW_MIN, 10),
+    errorSpikeMinRequests: num(process.env.ERROR_SPIKE_MIN_REQUESTS, 10),
   };
 }
 
@@ -142,6 +151,9 @@ let current: Settings = (() => {
           raw.modelFallbacks && typeof raw.modelFallbacks === 'object' && !Array.isArray(raw.modelFallbacks)
             ? (raw.modelFallbacks as Record<string, string[]>)
             : base.modelFallbacks,
+        errorSpikeThreshold: num(raw.errorSpikeThreshold, base.errorSpikeThreshold),
+        errorSpikeWindowMin: num(raw.errorSpikeWindowMin, base.errorSpikeWindowMin),
+        errorSpikeMinRequests: num(raw.errorSpikeMinRequests, base.errorSpikeMinRequests),
       };
     }
   } catch {
@@ -199,6 +211,14 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       patch.modelFallbacks && typeof patch.modelFallbacks === 'object' && !Array.isArray(patch.modelFallbacks)
         ? patch.modelFallbacks
         : current.modelFallbacks,
+    errorSpikeThreshold:
+      patch.errorSpikeThreshold !== undefined
+        ? Math.min(1, Math.max(0, num(patch.errorSpikeThreshold, current.errorSpikeThreshold)))
+        : current.errorSpikeThreshold,
+    errorSpikeWindowMin:
+      patch.errorSpikeWindowMin !== undefined ? num(patch.errorSpikeWindowMin, current.errorSpikeWindowMin) : current.errorSpikeWindowMin,
+    errorSpikeMinRequests:
+      patch.errorSpikeMinRequests !== undefined ? num(patch.errorSpikeMinRequests, current.errorSpikeMinRequests) : current.errorSpikeMinRequests,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
