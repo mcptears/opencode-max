@@ -530,5 +530,95 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ ok: true, restartRequired: portChanged, settings: { ...next, adminToken: next.adminToken ? '••••••••' : '' } });
   });
 
+  // ---- backup / restore ----
+  // Export everything (accounts, providers, scraper providers, settings).
+  // Contains API keys — require auth even for GET.
+  router.get('/api/backup', (req, res) => {
+    adminAuth(req, res, () => {
+      res.setHeader(
+        'content-disposition',
+        `attachment; filename="opencode-max-backup-${new Date().toISOString().slice(0, 10)}.json"`,
+      );
+      let accounts: AccountConfig[] = [];
+      try {
+        accounts = readAccounts();
+      } catch {
+        /* no accounts file yet — export empty */
+      }
+      res.json({
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        accounts,
+        providers: loadProviders(),
+        scraperProviders: loadScraperProviders(),
+        settings: getSettings(),
+      });
+    });
+  });
+
+  /** Restore a backup file. Only the sections present in the payload are replaced. */
+  router.post('/api/backup/restore', (req, res) => {
+    const body = jsonBody(req) as Record<string, unknown>;
+    const bad = (msg: string): void => {
+      res.status(400).json({ error: { message: msg, status: 400 } });
+    };
+
+    let accounts: AccountConfig[] | null = null;
+    if (body.accounts !== undefined) {
+      if (!Array.isArray(body.accounts)) return bad('accounts must be an array');
+      accounts = [];
+      for (const a of body.accounts) {
+        const v = validateAccount(a);
+        if (!v.ok) return bad(`invalid account: ${v.error}`);
+        accounts.push(v.account);
+      }
+    }
+
+    let providers: ProviderConfig[] | null = null;
+    if (body.providers !== undefined) {
+      if (!Array.isArray(body.providers)) return bad('providers must be an array');
+      providers = [];
+      for (const p of body.providers) {
+        const v = validateProviderInput(p);
+        if (!v.ok) return bad(`invalid provider: ${v.error}`);
+        providers.push(v.provider);
+      }
+    }
+
+    let scraperProviders: { id: string; name: string; url: string; format: ProviderFormat; enabled: boolean }[] | null = null;
+    if (body.scraperProviders !== undefined) {
+      if (!Array.isArray(body.scraperProviders)) return bad('scraperProviders must be an array');
+      scraperProviders = [];
+      for (const p of body.scraperProviders as Record<string, unknown>[]) {
+        if (!p || typeof p.id !== 'string' || typeof p.url !== 'string') return bad('invalid scraper provider entry');
+        try {
+          new URL(p.url);
+        } catch {
+          return bad(`invalid scraper provider url: ${p.url}`);
+        }
+        scraperProviders.push({
+          id: p.id,
+          name: typeof p.name === 'string' ? p.name : p.id,
+          url: p.url,
+          format: p.format === 'geonode' || p.format === 'spys' || p.format === 'fpl' || p.format === 'proxynova' ? p.format : 'text',
+          enabled: p.enabled !== false,
+        });
+      }
+    }
+
+    // All sections validated — apply.
+    if (accounts) {
+      writeAccounts(accounts);
+      pool.replace(accounts);
+    }
+    if (providers) saveProviders(providers);
+    if (scraperProviders) saveScraperProviders(scraperProviders);
+    if (body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)) {
+      saveSettings(body.settings as Parameters<typeof saveSettings>[0]);
+    }
+    metrics.record('settings', 'configuration restored from backup');
+    res.json({ ok: true });
+  });
+
   return router;
 }
