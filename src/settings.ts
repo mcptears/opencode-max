@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CONFIG } from './config.js';
+import { globMatch } from './providers.js';
 
 export interface Settings {
   port: number;
@@ -45,6 +46,8 @@ export interface Settings {
   errorSpikeMinRequests: number;
   /** Client API tokens for /v1/* (empty = no auth required). */
   clientTokens: string[];
+  /** Per-model upstream timeouts in ms: exact name or glob pattern → timeout. */
+  modelTimeouts: Record<string, number>;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -87,6 +90,7 @@ function fromEnv(): Settings {
     errorSpikeWindowMin: num(process.env.ERROR_SPIKE_WINDOW_MIN, 10),
     errorSpikeMinRequests: num(process.env.ERROR_SPIKE_MIN_REQUESTS, 10),
     clientTokens: (process.env.CLIENT_TOKENS ?? '').split(',').map((t) => t.trim()).filter(Boolean),
+    modelTimeouts: parseModelTimeouts(process.env.MODEL_TIMEOUTS),
   };
 }
 
@@ -111,6 +115,42 @@ export function parseModelFallbacks(v: string | undefined): Record<string, strin
   } catch {
     return {};
   }
+}
+
+export function parseModelTimeouts(v: string | undefined): Record<string, number> {
+  if (!v) return {};
+  try {
+    const raw = JSON.parse(v) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: Record<string, number> = {};
+    for (const [k, ms] of Object.entries(raw as Record<string, unknown>)) {
+      const n = typeof ms === 'number' ? ms : Number(ms);
+      if (typeof k === 'string' && k.length > 0 && Number.isFinite(n) && n >= 1000) {
+        out[k] = Math.floor(n);
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Resolve the upstream timeout for a model: exact name match wins, then the
+ * first glob pattern that matches, then the global default.
+ */
+export function resolveModelTimeout(
+  timeouts: Record<string, number>,
+  model: string | undefined,
+  defaultMs: number,
+): number {
+  if (model && timeouts[model] !== undefined) return timeouts[model];
+  if (model) {
+    for (const [pattern, ms] of Object.entries(timeouts)) {
+      if (pattern.includes('*') && globMatch(pattern, model)) return ms;
+    }
+  }
+  return defaultMs;
 }
 
 function parseEgressFamily(v: string | undefined): 'auto' | '4' | '6' {
@@ -160,6 +200,10 @@ let current: Settings = (() => {
         clientTokens: Array.isArray(raw.clientTokens)
           ? raw.clientTokens.filter((t): t is string => typeof t === 'string' && t.length > 0)
           : base.clientTokens,
+        modelTimeouts:
+          raw.modelTimeouts && typeof raw.modelTimeouts === 'object'
+            ? parseModelTimeouts(JSON.stringify(raw.modelTimeouts))
+            : base.modelTimeouts,
       };
     }
   } catch {
@@ -229,6 +273,10 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       Array.isArray(patch.clientTokens)
         ? patch.clientTokens.filter((t): t is string => typeof t === 'string' && t.length > 0)
         : current.clientTokens,
+    modelTimeouts:
+      patch.modelTimeouts && typeof patch.modelTimeouts === 'object'
+        ? parseModelTimeouts(JSON.stringify(patch.modelTimeouts))
+        : current.modelTimeouts,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
