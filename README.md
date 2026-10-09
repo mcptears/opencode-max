@@ -23,9 +23,10 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 37 unit tests, `npm test` |
+| 🧪 | **Tested** | 53 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
+| 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
 
 ## ⚙️ How it works
 
@@ -113,6 +114,30 @@ POST   /api/scraper/run            # start a scrape (async)
 GET    /api/scraper/status         # poll progress / result
 POST   /api/proxies/test           # test proxies without adding
 ```
+
+## 🔌 Multi-provider routing
+
+opencode-max can front **multiple OpenAI-compatible upstreams** and route by model name — 9router-style. Each provider has its own base URL, model patterns (globs), account pool and on/off switch. Specific patterns beat the `*` catch-all, so `qwen*` routes to Qwen while everything else falls through to Zen.
+
+Manage them in the dashboard's **Providers** section (add, test connection, enable/disable, remove), or via API:
+
+```bash
+GET    /api/providers              # list
+POST   /api/providers              # { id, name, baseUrl, models[], enabled }
+PUT    /api/providers/:id
+DELETE /api/providers/:id
+POST   /api/providers/:id/test     # live /models check
+```
+
+`GET /v1/models` aggregates the model catalogs of all enabled providers. Accounts belong to a provider via their `provider` field; the base URL resolves as `account.baseUrl` → `provider.baseUrl` → `UPSTREAM_BASE`.
+
+### Qwen via qwen2api
+
+1. Deploy [qwen2api](https://github.com/smanx/qwen2api) yourself (Docker, Vercel, Netlify or Cloudflare Workers — see its README), listening on port `8765`.
+2. In the dashboard, hit **Add Qwen (qwen2api) provider** — or `POST /api/providers/preset/qwen`.
+3. No account needed: if your qwen2api has no `API_TOKENS` set, requests forward without a key. If it does, add an account on the `qwen` provider with the token.
+
+Then just ask for a Qwen model — `qwen-max`, `qwen-plus`, … — and it routes there, with the same proxy rotation, retries and session handling as Zen.
 
 ## 🐳 Docker
 
