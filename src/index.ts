@@ -11,6 +11,7 @@ import { Metrics } from './metrics.js';
 import { projectRoot } from './paths.js';
 import { buildRouter } from './routes.js';
 import { loadProviders } from './providers.js';
+import { ScraperJob } from './scraperJob.js';
 import { SessionManager } from './sessionManager.js';
 import { QuotaTracker } from './quota.js';
 import { getSettings } from './settings.js';
@@ -73,6 +74,7 @@ async function main(): Promise<void> {
   const sessions = new SessionManager();
   const metrics = new Metrics();
   const quota = new QuotaTracker();
+  const scraperJob = new ScraperJob(rotator, metrics);
   pool.setQuotaTracker(quota);
   // Prune old usage events hourly so the table stays small.
   const quotaPruneTimer = setInterval(() => quota.prune(), 3600_000);
@@ -97,6 +99,23 @@ async function main(): Promise<void> {
   }
   rotator.configureEgress({ familyMode: settings.egressFamily, dualStack });
 
+  // Scheduled proxy re-scraping: keeps the pool fresh without manual runs.
+  // Self-rescheduling so dashboard toggle/interval changes apply live.
+  // First run is delayed 60s so boot stays snappy.
+  const scheduleScrape = (delayMs: number): void => {
+    const t = setTimeout(() => {
+      const s = getSettings();
+      if (s.autoScrape) {
+        if (scraperJob.start(true)) {
+          metrics.record('settings', `auto-scrape: next run in ${s.autoScrapeIntervalHours}h`);
+        }
+      }
+      scheduleScrape(Math.max(1, getSettings().autoScrapeIntervalHours) * 3600_000);
+    }, delayMs);
+    if (typeof t.unref === 'function') t.unref();
+  };
+  scheduleScrape(60_000);
+
   const app = express();
   app.disable('x-powered-by');
   app.use(express.raw({ type: () => true, limit: '25mb' }));
@@ -105,7 +124,7 @@ async function main(): Promise<void> {
   app.use('/dashboard', express.static(dashboardRoot(), { index: 'dashboard.html' }));
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(dashboardRoot(), 'dashboard.html')));
   app.get('/', (_req, res) => res.redirect('/dashboard/'));
-  app.use(buildAdminRouter({ pool, rotator, sessions, metrics }));
+  app.use(buildAdminRouter({ pool, rotator, sessions, metrics, scraper: scraperJob }));
   // Providers are re-read from disk on every request so dashboard edits apply live.
   app.use(buildRouter(pool, rotator, sessions, metrics, quota, loadProviders));
 
