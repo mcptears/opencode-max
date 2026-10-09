@@ -23,7 +23,7 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 150 unit tests, `npm test` |
+| 🧪 | **Tested** | 184 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 | 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, Qwen, …) |
@@ -93,7 +93,7 @@ Request log (status, latency, model) and the event feed persist in SQLite and su
 
 ## ✂️ Token saver
 
-Agentic loops stuff tens of thousands of characters of diffs/logs into `tool_result` payloads. Before forwarding, oversized results are compressed — blank runs collapsed, repeated log lines deduped, the rest middle-truncated keeping head + tail. Only tool-result content is ever touched. Estimated tokens saved (chars/4) accumulate on the dashboard. Toggle with `TOKEN_SAVER=0`.
+Agentic loops stuff tens of thousands of characters of diffs/logs into `tool_result` payloads. Before forwarding, each blob is auto-detected and compressed with a content-aware filter — `git-diff` (hunk truncation + per-file +/- summary), `git-log`, `git-status`, `build-output` (keeps errors/warnings, drops progress noise), `grep`/`find` (grouped by file/dir), `ls`, `tree`, `search-list`, `read-numbered`, `dedup-log`, `smart-truncate`. Detection peeks at the first 1KB, so there's no config. It's fail-safe: a filter that throws, returns empty, or grows the input is discarded and the original text is kept; error traces (`is_error`) are never touched. Anything still over `TOKEN_SAVER_MAX_CHARS` is middle-truncated (head + tail) as a last resort. Estimated tokens saved (chars/4) accumulate on the dashboard. Toggle with `TOKEN_SAVER=0`.
 
 ## 🔗 Connect flow — no JSON editing
 
@@ -367,7 +367,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 150 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 184 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
