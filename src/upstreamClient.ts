@@ -6,6 +6,9 @@ import { sanitizeHeaders, sanitizePayload } from './sanitizer.js';
 import { getSettings } from './settings.js';
 import type { SessionManager } from './sessionManager.js';
 
+/** Thrown when one provider can't serve the request; forward() fails over to the next. */
+export class ProviderExhaustedError extends Error {}
+
 export interface ForwardRequest {
   method: string;
   /** Path on the upstream, e.g. "/chat/completions". */
@@ -51,7 +54,7 @@ function httpError(status: number, message: string): Error & { status: number } 
 import type { QuotaTracker } from './quota.js';
 import { compressToolResults } from './tokenSaver.js';
 import type { AccountConfig } from './config.js';
-import type { ProviderConfig } from './providers.js';
+import { globMatch, type ProviderConfig } from './providers.js';
 
 /**
  * Forwards requests to the configured upstream provider (OpenCode Zen by
@@ -79,11 +82,13 @@ export class UpstreamClient {
     return getSettings().upstreamBase.replace(/\/+$/, '');
   }
 
+  /**
+   * Forward with cross-provider failover: if the primary provider's accounts
+   * are all exhausted (or its upstream is down), try the next eligible
+   * provider before giving up. Fallback candidates must be able to serve the
+   * model — their patterns match it, or they're a catch-all.
+   */
   async forward(req: ForwardRequest): Promise<ForwardResult> {
-    let lastError: unknown = null;
-    const maxRetries = getSettings().maxRetries;
-    const startedAt = Date.now();
-    let lastAccountId = '';
     let model: string | undefined;
     if (req.bodyText) {
       try {
@@ -93,21 +98,55 @@ export class UpstreamClient {
         /* ignore */
       }
     }
+    const chain = this.providerChain(req.provider, model);
+    let lastError: unknown = null;
+    for (let i = 0; i < chain.length; i++) {
+      try {
+        return await this.forwardToProvider(req, chain[i], model);
+      } catch (e) {
+        if (!(e instanceof ProviderExhaustedError)) throw e;
+        lastError = e;
+        if (i + 1 < chain.length) this.metrics?.failover(chain[i], chain[i + 1]);
+      }
+    }
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw httpError(502, `all providers exhausted: ${detail}`);
+  }
+
+  /** Primary first, then other enabled providers eligible for this model. */
+  private providerChain(primary: string | undefined, model: string | undefined): string[] {
+    const enabled = this.getProviders().filter((p) => p.enabled);
+    const chain: string[] = [];
+    if (primary) chain.push(primary);
+    for (const p of enabled) {
+      if (chain.includes(p.id)) continue;
+      if (!model || p.models.includes('*') || p.models.some((m) => globMatch(m, model))) {
+        chain.push(p.id);
+      }
+    }
+    return chain.length > 0 ? chain : [primary ?? 'default'];
+  }
+
+  private async forwardToProvider(req: ForwardRequest, providerId: string, model: string | undefined): Promise<ForwardResult> {
+    let lastError: unknown = null;
+    const maxRetries = getSettings().maxRetries;
+    const startedAt = Date.now();
+    let lastAccountId = '';
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const realAccount = this.pool.acquire(req.provider);
+      const realAccount = this.pool.acquire(providerId);
       // Keyless providers (no accounts configured) forward anonymously.
       const account: AccountConfig | null =
         realAccount ??
-        (req.allowAnonymous && this.pool.count(req.provider) === 0
-          ? { id: `${req.provider ?? 'default'}:anonymous`, name: 'anonymous', provider: req.provider ?? '', apiKey: '', priority: 1 }
+        (req.allowAnonymous && this.pool.count(providerId) === 0
+          ? { id: `${providerId}:anonymous`, name: 'anonymous', provider: providerId, apiKey: '', priority: 1 }
           : null);
       if (!account) {
-        const msg = this.pool.allInvalid(req.provider)
-          ? 'all API keys are flagged invalid — fix them in the dashboard and reset'
-          : 'all accounts exhausted (rate-limited or none configured)';
+        const msg = this.pool.allInvalid(providerId)
+          ? `all API keys are flagged invalid on '${providerId}' — fix them in the dashboard and reset`
+          : `all accounts exhausted on '${providerId}' (rate-limited or none configured)`;
         this.metrics?.logRequest(lastAccountId || 'none', 503, Date.now() - startedAt, model);
-        throw httpError(503, msg);
+        throw new ProviderExhaustedError(msg);
       }
       lastAccountId = account.id;
       this.metrics?.hit(account.id);
@@ -212,7 +251,7 @@ export class UpstreamClient {
     }
 
     this.metrics?.logRequest(lastAccountId || 'none', 502, Date.now() - startedAt, model);
-    throw httpError(502, `upstream unreachable after ${maxRetries + 1} attempts: ${String(lastError)}`);
+    throw new ProviderExhaustedError(`'${providerId}' unreachable after ${maxRetries + 1} attempts: ${String(lastError)}`);
   }
 
   private toResult(upstream: Response): ForwardResult {
