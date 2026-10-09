@@ -23,7 +23,7 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 133 unit tests, `npm test` |
+| 🧪 | **Tested** | 139 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 | 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
@@ -105,6 +105,14 @@ The dashboard's **Connect OpenCode account** button opens a guided modal:
 4. ✅ Added to the pool instantly with an auto id
 
 The server also boots with an empty pool, so connecting from the dashboard is the first-run onboarding path.
+
+## 👥 Account management — zero JSON
+
+Every account field is editable from the dashboard — no config files needed:
+
+- **Add manually** for any provider: display name, provider, API key (empty = keyless provider, e.g. self-hosted qwen2api without `API_TOKENS`), priority, per-account cooldown after 429s, upstream URL override, and a per-account 5h quota limit.
+- **Edit** any account inline: rename, move providers, rotate the key (leave empty to keep it, or tick *Remove key* to go keyless), and tweak priority / cooldown / upstream / quota.
+- The accounts table shows live `used/limit` quota against each account's own limit.
 
 ## 🕷️ Proxy scraper
 
@@ -355,7 +363,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 133 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 139 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
