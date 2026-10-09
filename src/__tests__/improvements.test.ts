@@ -154,3 +154,71 @@ describe('recentRequests', () => {
     expect(zz[1].provider).toBe('zen');
   });
 });
+
+describe('concurrency caps', () => {
+  it('skips accounts at the cap and re-admits after release', () => {
+    saveSettings({ accountConcurrency: 1 });
+    const pool = new AccountPool([
+      { id: 'a', name: 'a', provider: 'p', apiKey: 'k', priority: 1 },
+      { id: 'b', name: 'b', provider: 'p', apiKey: 'k', priority: 2 },
+    ]);
+    expect(pool.acquire('p')?.id).toBe('a');
+    expect(pool.acquire('p')?.id).toBe('b'); // a is at cap
+    expect(pool.acquire('p')).toBeNull(); // both at cap
+    pool.release('a');
+    expect(pool.acquire('p')?.id).toBe('a');
+    pool.release('a');
+    pool.release('b');
+  });
+
+  it('is unlimited when cap is 0', () => {
+    saveSettings({ accountConcurrency: 0 });
+    const pool = new AccountPool([{ id: 'a', name: 'a', provider: 'p', apiKey: 'k', priority: 1 }]);
+    expect(pool.acquire('p')?.id).toBe('a');
+    expect(pool.acquire('p')?.id).toBe('a');
+    expect(pool.status()[0].inflight).toBe(0); // not tracked when unlimited
+  });
+
+  it('forward() releases the slot on success', async () => {
+    saveSettings({ accountConcurrency: 2, maxRetries: 0, retryBaseMs: 1, retryMaxMs: 1 });
+    const pool = new AccountPool([{ id: 'a', name: 'a', provider: 'p', apiKey: 'k', priority: 1 }]);
+    const rotator = { current: () => null, dispatcherFor: () => undefined, rotate: () => {}, egressLabel: () => 'd', currentFamily: () => 4 } as never;
+    const sessions = { id: 's', rotate: () => {} } as never;
+    const client = new UpstreamClient(pool, rotator, sessions, new Metrics(), undefined, () => [
+      { id: 'p', name: 'P', baseUrl: 'http://p.invalid/v1', models: ['*'], enabled: true },
+    ]);
+    await client.forward({ method: 'POST', path: '/chat/completions', query: '', headers: {}, bodyText: JSON.stringify({ model: 'm' }), provider: 'p' });
+    expect(pool.status()[0].inflight).toBe(0);
+  });
+});
+
+describe('concurrency queue', () => {
+  it('atCap/hasCapacity reflect the cap', () => {
+    saveSettings({ accountConcurrency: 1 });
+    const pool = new AccountPool([{ id: 'a', name: 'a', provider: 'p', apiKey: 'k', priority: 1 }]);
+    expect(pool.atCap('p')).toBe(false);
+    expect(pool.hasCapacity('p')).toBe(true);
+    expect(pool.acquire('p')?.id).toBe('a');
+    expect(pool.atCap('p')).toBe(true);
+    expect(pool.hasCapacity('p')).toBe(false);
+    pool.release('a');
+    expect(pool.atCap('p')).toBe(false);
+    expect(pool.hasCapacity('p')).toBe(true);
+  });
+
+  it('queues for a slot instead of 502ing', async () => {
+    saveSettings({ accountConcurrency: 1, queueMaxWaitMs: 5000, maxRetries: 0, retryBaseMs: 1, retryMaxMs: 1 });
+    const pool = new AccountPool([{ id: 'a', name: 'a', provider: 'p', apiKey: 'k', priority: 1 }]);
+    // Hold the only slot, then release it after 120ms.
+    expect(pool.acquire('p')?.id).toBe('a');
+    setTimeout(() => pool.release('a'), 120);
+    const rotator = { current: () => null, dispatcherFor: () => undefined, rotate: () => {}, egressLabel: () => 'd', currentFamily: () => 4 } as never;
+    const sessions = { id: 's', rotate: () => {} } as never;
+    const client = new UpstreamClient(pool, rotator, sessions, new Metrics(), undefined, () => [
+      { id: 'p', name: 'P', baseUrl: 'http://p.invalid/v1', models: ['*'], enabled: true },
+    ]);
+    const res = await client.forward({ method: 'POST', path: '/chat/completions', query: '', headers: {}, bodyText: JSON.stringify({ model: 'm' }), provider: 'p' });
+    expect(res.status).toBe(200);
+    expect(pool.status()[0].inflight).toBe(0);
+  });
+});
