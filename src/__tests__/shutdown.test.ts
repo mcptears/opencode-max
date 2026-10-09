@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type express from 'express';
 import { waitForDrain, inflightTracker, drainTimeoutMs } from '../shutdown.js';
+import { saveSettings } from '../settings.js';
 
-afterEach(() => {
-  delete process.env.SHUTDOWN_DRAIN_MS;
+beforeEach(() => {
+  saveSettings({ shutdownDrainMs: 30_000 });
 });
 
 describe('waitForDrain', () => {
@@ -65,13 +66,13 @@ describe('drainTimeoutMs', () => {
     expect(drainTimeoutMs()).toBe(30_000);
   });
 
-  it('honours the env override', () => {
-    process.env.SHUTDOWN_DRAIN_MS = '5000';
+  it('honours the setting', () => {
+    saveSettings({ shutdownDrainMs: 5000 });
     expect(drainTimeoutMs()).toBe(5000);
   });
 
   it('falls back on garbage', () => {
-    process.env.SHUTDOWN_DRAIN_MS = 'nope';
+    saveSettings({ shutdownDrainMs: NaN });
     expect(drainTimeoutMs()).toBe(30_000);
   });
 });
