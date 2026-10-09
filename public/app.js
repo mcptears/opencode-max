@@ -224,6 +224,7 @@ async function loadSettings() {
     if (f.tokenSaver) f.tokenSaver.checked = settings.tokenSaver !== false;
     if (f.autoScrape) f.autoScrape.checked = settings.autoScrape === true;
     if (f.routingStrategy && settings.routingStrategy) f.routingStrategy.value = settings.routingStrategy;
+    if (f.modelFallbacks) f.modelFallbacks.value = JSON.stringify(settings.modelFallbacks || {}, null, 1);
   } catch { /* ignore */ }
 }
 
@@ -418,6 +419,14 @@ $('#settingsForm').onsubmit = async (e) => {
   body.autoScrape = !!f.autoScrape.checked;
   if (f.routingStrategy && f.routingStrategy.value) body.routingStrategy = f.routingStrategy.value;
   if (f.alertWebhookUrl.value) body.alertWebhookUrl = f.alertWebhookUrl.value;
+  if (f.modelFallbacks && f.modelFallbacks.value.trim()) {
+    try {
+      body.modelFallbacks = JSON.parse(f.modelFallbacks.value);
+    } catch {
+      $('#settingsMsg').textContent = 'Save failed: model fallbacks is not valid JSON.';
+      return;
+    }
+  }
   if (f.egressFamily && f.egressFamily.value) body.egressFamily = f.egressFamily.value;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
