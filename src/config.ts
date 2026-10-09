@@ -13,6 +13,8 @@ export interface AccountConfig {
   cooldownPeriod?: number;
   /** Optional per-account upstream override (defaults to UPSTREAM_BASE). */
   baseUrl?: string;
+  /** Optional per-account rolling 5h request budget (defaults to QUOTA_5H_LIMIT). */
+  quotaLimit?: number;
 }
 
 export interface RuntimeConfig {
