@@ -6,6 +6,7 @@ import type { IpRotator } from './ipRotator.js';
 import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parseModelTimeouts } from './settings.js';
+import { reinitFileLogger } from './logger.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
@@ -534,6 +535,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (body.modelTimeouts !== undefined) {
       patch.modelTimeouts = parseModelTimeouts(JSON.stringify(body.modelTimeouts));
     }
+    if (typeof body.logFile === 'string') patch.logFile = body.logFile.trim();
+    if (body.logMaxMb !== undefined) patch.logMaxMb = body.logMaxMb;
+    if (body.logKeep !== undefined) patch.logKeep = body.logKeep;
     if (body.errorSpikeThreshold !== undefined) patch.errorSpikeThreshold = body.errorSpikeThreshold;
     if (body.errorSpikeWindowMin !== undefined) patch.errorSpikeWindowMin = body.errorSpikeWindowMin;
     if (body.errorSpikeMinRequests !== undefined) patch.errorSpikeMinRequests = body.errorSpikeMinRequests;
@@ -552,6 +556,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     rotator.stopHealthChecks();
     if (next.proxyHealthCheck) rotator.startHealthChecks(next.proxyHealthIntervalMs);
     rotator.configureEgress({ familyMode: next.egressFamily });
+    reinitFileLogger(); // pick up logFile / rotation changes without a restart
     metrics.record('settings', 'settings updated via dashboard');
     res.json({ ok: true, restartRequired: portChanged, settings: { ...next, adminToken: next.adminToken ? '••••••••' : '', clientTokens: [] }, clientTokensCount: next.clientTokens.length });
   });
