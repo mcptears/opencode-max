@@ -225,6 +225,8 @@ async function loadSettings() {
     if (f.autoScrape) f.autoScrape.checked = settings.autoScrape === true;
     if (f.routingStrategy && settings.routingStrategy) f.routingStrategy.value = settings.routingStrategy;
     if (f.modelFallbacks) f.modelFallbacks.value = JSON.stringify(settings.modelFallbacks || {}, null, 1);
+    const ctc = $('#clientTokensCount');
+    if (ctc) ctc.textContent = settings.clientTokensCount ? `${settings.clientTokensCount} configured` : 'none — proxy is open';
   } catch { /* ignore */ }
 }
 
@@ -457,11 +459,15 @@ $('#settingsForm').onsubmit = async (e) => {
   }
   if (f.egressFamily && f.egressFamily.value) body.egressFamily = f.egressFamily.value;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
+  if (f.clientTokens && f.clientTokens.value.trim()) body.clientTokens = f.clientTokens.value;
+  if (f.clearClientTokens && f.clearClientTokens.checked) body.clearClientTokens = true;
   const r = await jpost('/api/settings', body);
   const d = await r.json().catch(() => ({}));
   $('#settingsMsg').textContent = r.ok ? '✓ Saved' + (d.restartRequired ? ' — restart required for the port change.' : '') : 'Save failed.';
   f.adminToken.value = '';
   f.alertWebhookUrl.value = '';
+  if (f.clientTokens) f.clientTokens.value = '';
+  if (f.clearClientTokens) f.clearClientTokens.checked = false;
   refresh();
 };
 
