@@ -43,6 +43,8 @@ export interface Settings {
   errorSpikeWindowMin: number;
   /** Minimum requests in the window before a spike can trigger. */
   errorSpikeMinRequests: number;
+  /** Client API tokens for /v1/* (empty = no auth required). */
+  clientTokens: string[];
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -84,6 +86,7 @@ function fromEnv(): Settings {
     errorSpikeThreshold: num(process.env.ERROR_SPIKE_THRESHOLD, 0.5),
     errorSpikeWindowMin: num(process.env.ERROR_SPIKE_WINDOW_MIN, 10),
     errorSpikeMinRequests: num(process.env.ERROR_SPIKE_MIN_REQUESTS, 10),
+    clientTokens: (process.env.CLIENT_TOKENS ?? '').split(',').map((t) => t.trim()).filter(Boolean),
   };
 }
 
@@ -154,6 +157,9 @@ let current: Settings = (() => {
         errorSpikeThreshold: num(raw.errorSpikeThreshold, base.errorSpikeThreshold),
         errorSpikeWindowMin: num(raw.errorSpikeWindowMin, base.errorSpikeWindowMin),
         errorSpikeMinRequests: num(raw.errorSpikeMinRequests, base.errorSpikeMinRequests),
+        clientTokens: Array.isArray(raw.clientTokens)
+          ? raw.clientTokens.filter((t): t is string => typeof t === 'string' && t.length > 0)
+          : base.clientTokens,
       };
     }
   } catch {
@@ -219,6 +225,10 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       patch.errorSpikeWindowMin !== undefined ? num(patch.errorSpikeWindowMin, current.errorSpikeWindowMin) : current.errorSpikeWindowMin,
     errorSpikeMinRequests:
       patch.errorSpikeMinRequests !== undefined ? num(patch.errorSpikeMinRequests, current.errorSpikeMinRequests) : current.errorSpikeMinRequests,
+    clientTokens:
+      Array.isArray(patch.clientTokens)
+        ? patch.clientTokens.filter((t): t is string => typeof t === 'string' && t.length > 0)
+        : current.clientTokens,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
