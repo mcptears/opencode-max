@@ -112,6 +112,12 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ hours, models: metrics.modelStats(hours, providerOf()) });
   });
 
+  /** Token usage (prompt/completion) reported by upstreams, per account and model. */
+  router.get('/api/usage', (req, res) => {
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    res.json({ hours, ...metrics.usageStats(hours) });
+  });
+
   /** Recent proxied requests, newest first (dashboard inspector). */
   router.get('/api/requests', (req, res) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
