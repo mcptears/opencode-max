@@ -7,6 +7,7 @@ import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parseModelTimeouts } from './settings.js';
 import { reinitFileLogger } from './logger.js';
+import { renderPrometheus } from './prometheus.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
@@ -123,6 +124,11 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   router.get('/api/metrics/providers', (req, res) => {
     const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
     res.json({ hours, providers: metrics.providerHealth(hours, providerOf()) });
+  });
+
+  /** Prometheus exposition format for external monitoring (Grafana, …). */
+  router.get('/metrics', (_req, res) => {
+    res.type('text/plain; version=0.0.4').send(renderPrometheus(metrics, pool));
   });
 
   /** Recent proxied requests, newest first (dashboard inspector). */
