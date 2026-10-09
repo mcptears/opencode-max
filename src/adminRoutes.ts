@@ -26,7 +26,8 @@ function validateAccount(a: unknown): { ok: true; account: AccountConfig } | { o
   const r = a as Record<string, unknown>;
   if (typeof r.id !== 'string' || !r.id.trim()) return { ok: false, error: 'id is required' };
   if (typeof r.provider !== 'string' || !r.provider.trim()) return { ok: false, error: 'provider is required' };
-  if (typeof r.apiKey !== 'string' || !r.apiKey.trim()) return { ok: false, error: 'apiKey is required' };
+  // Empty key is allowed: keyless providers (e.g. self-hosted qwen2api without API_TOKENS).
+  if (typeof r.apiKey !== 'string') return { ok: false, error: 'apiKey must be a string' };
   if (typeof r.priority !== 'number' || !Number.isFinite(r.priority)) return { ok: false, error: 'priority must be a number' };
   const account: AccountConfig = {
     id: r.id.trim(),
@@ -36,6 +37,10 @@ function validateAccount(a: unknown): { ok: true; account: AccountConfig } | { o
     priority: r.priority as number,
     cooldownPeriod: typeof r.cooldownPeriod === 'number' && r.cooldownPeriod > 0 ? r.cooldownPeriod : undefined,
     baseUrl: typeof r.baseUrl === 'string' && (r.baseUrl as string).trim() ? (r.baseUrl as string).trim() : undefined,
+    quotaLimit:
+      typeof r.quotaLimit === 'number' && Number.isFinite(r.quotaLimit) && r.quotaLimit > 0
+        ? Math.floor(r.quotaLimit)
+        : undefined,
   };
   return { ok: true, account };
 }
@@ -225,15 +230,23 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   });
 
   router.put('/api/accounts/:id', (req, res) => {
-    const v = validateAccount({ ...((jsonBody(req) ?? {}) as object), id: req.params.id });
-    if (!v.ok) {
-      res.status(400).json({ error: { message: v.error, status: 400 } });
-      return;
-    }
+    const body = (jsonBody(req) ?? {}) as Record<string, unknown>;
     const accounts = readAccounts();
     const i = accounts.findIndex((a) => a.id === req.params.id);
     if (i < 0) {
       res.status(404).json({ error: { message: 'account not found', status: 404 } });
+      return;
+    }
+    // Empty apiKey on edit = keep the existing key (keys are never sent to the UI).
+    // Explicit clearApiKey: true converts a keyed account to keyless.
+    if (body.clearApiKey === true) {
+      body.apiKey = '';
+    } else if (typeof body.apiKey !== 'string' || !body.apiKey.trim()) {
+      body.apiKey = accounts[i].apiKey;
+    }
+    const v = validateAccount({ ...body, id: req.params.id });
+    if (!v.ok) {
+      res.status(400).json({ error: { message: v.error, status: 400 } });
       return;
     }
     accounts[i] = v.account;
@@ -544,6 +557,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (typeof body.logFile === 'string') patch.logFile = body.logFile.trim();
     if (body.logMaxMb !== undefined) patch.logMaxMb = body.logMaxMb;
     if (body.logKeep !== undefined) patch.logKeep = body.logKeep;
+    if (body.shutdownDrainMs !== undefined) patch.shutdownDrainMs = body.shutdownDrainMs;
     if (body.errorSpikeThreshold !== undefined) patch.errorSpikeThreshold = body.errorSpikeThreshold;
     if (body.errorSpikeWindowMin !== undefined) patch.errorSpikeWindowMin = body.errorSpikeWindowMin;
     if (body.errorSpikeMinRequests !== undefined) patch.errorSpikeMinRequests = body.errorSpikeMinRequests;
