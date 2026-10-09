@@ -55,6 +55,21 @@ import type { QuotaTracker } from './quota.js';
 import { compressToolResults } from './tokenSaver.js';
 import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
+import type { Alerter } from './alerts.js';
+
+/** Sleep that resolves early when the client aborts. */
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(t);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const t = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
 
 /**
  * Forwards requests to the configured upstream provider (OpenCode Zen by
@@ -72,6 +87,7 @@ export class UpstreamClient {
     private readonly quota?: QuotaTracker,
     /** Live provider registry (dashboard edits apply without restart). */
     private readonly getProviders: () => ProviderConfig[] = () => [],
+    private readonly alerter?: Alerter,
   ) {}
 
   /** account.baseUrl > provider.baseUrl > global upstreamBase */
@@ -110,6 +126,7 @@ export class UpstreamClient {
       }
     }
     const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    void this.alerter?.send('pool_exhausted', `all providers exhausted for model '${model ?? 'unknown'}': ${detail.slice(0, 120)}`);
     throw httpError(502, `all providers exhausted: ${detail}`);
   }
 
@@ -132,6 +149,7 @@ export class UpstreamClient {
     const maxRetries = getSettings().maxRetries;
     const startedAt = Date.now();
     let lastAccountId = '';
+    let queuedOnce = false;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const realAccount = this.pool.acquire(providerId);
@@ -142,6 +160,20 @@ export class UpstreamClient {
           ? { id: `${providerId}:anonymous`, name: 'anonymous', provider: providerId, apiKey: '', priority: 1 }
           : null);
       if (!account) {
+        // Queue instead of failing fast: if a cooling account frees up soon,
+        // hold the request once and re-acquire instead of 503ing.
+        if (!queuedOnce && !this.pool.allInvalid(providerId)) {
+          const waitMs = this.pool.nextAvailableIn(providerId);
+          const maxWait = getSettings().queueMaxWaitMs;
+          if (waitMs > 0 && waitMs <= maxWait) {
+            queuedOnce = true;
+            this.metrics?.record('settings', `queueing request on '${providerId}' — next account free in ${Math.ceil(waitMs / 1000)}s`);
+            await sleepAbortable(waitMs, req.signal);
+            if (req.signal?.aborted) throw httpError(499, 'client closed request');
+            attempt--; // queueing is not a real attempt — don't burn the retry budget
+            continue;
+          }
+        }
         const msg = this.pool.allInvalid(providerId)
           ? `all API keys are flagged invalid on '${providerId}' — fix them in the dashboard and reset`
           : `all accounts exhausted on '${providerId}' (rate-limited or none configured)`;
@@ -150,6 +182,7 @@ export class UpstreamClient {
       }
       lastAccountId = account.id;
       this.metrics?.hit(account.id);
+      const attemptStart = Date.now();
 
       const proxy = this.rotator.current();
       const base = this.resolveBaseUrl(account);
@@ -219,6 +252,7 @@ export class UpstreamClient {
           if (looksInvalid && account.apiKey) {
             this.pool.markInvalid(account.id);
             this.metrics?.record('error', `invalid API key on ${account.id} — parked until reset`);
+            void this.alerter?.send('dead_key', `API key parked as invalid on account '${account.id}' (provider '${providerId}')`);
             try {
               await upstream.body?.cancel();
             } catch {
@@ -229,6 +263,7 @@ export class UpstreamClient {
           }
         }
         this.metrics?.ok();
+        if (account.apiKey) this.pool.recordLatency(account.id, Date.now() - attemptStart);
         this.metrics?.logRequest(account.id, upstream.status, Date.now() - startedAt, model);
         return this.toResult(upstream);
       }
