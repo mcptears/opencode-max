@@ -40,6 +40,7 @@ async function refresh() {
     drawTraffic();
     loadModels();
     loadUsage();
+    loadProviderHealth();
     loadRequests();
   } catch {
     $('#statusPill').textContent = 'offline';
@@ -131,6 +132,20 @@ async function loadUsage() {
       `<tr><td><code>${esc(u.accountId)}</code></td><td>${fmtTok(u.prompt)}</td><td>${fmtTok(u.completion)}</td>` +
       `<td><strong>${fmtTok(u.total)}</strong></td><td>${u.requests}</td></tr>`,
     ).join('') || '<tr><td colspan="5" class="hint">no token data yet</td></tr>';
+  } catch { /* ignore */ }
+}
+
+async function loadProviderHealth() {
+  try {
+    const { providers } = await (await api('/api/metrics/providers?hours=24')).json();
+    $('#provHealthTbl tbody').innerHTML = (providers || []).map((p) => {
+      const cls = p.successRate >= 99 ? 'tag ok' : p.successRate >= 90 ? 'tag warn' : 'tag bad';
+      const lastErr = p.lastErrorAt
+        ? `${p.lastErrorStatus} <span class="hint">${new Date(p.lastErrorAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`
+        : '<span class="hint">—</span>';
+      return `<tr><td><code>${esc(p.provider)}</code></td><td>${p.requests}</td>` +
+        `<td><span class="${cls}">${p.successRate}%</span></td><td>${p.avgLatencyMs}<small> ms</small></td><td>${lastErr}</td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="hint">no requests yet</td></tr>';
   } catch { /* ignore */ }
 }
 
