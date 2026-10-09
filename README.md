@@ -23,7 +23,7 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 86 unit tests, `npm test` |
+| 🧪 | **Tested** | 133 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 | 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
@@ -145,7 +145,7 @@ POST   /api/providers/:id/test     # live /models check
 
 ### Qwen via qwen2api
 
-1. Deploy [qwen2api](https://github.com/smanx/qwen2api) yourself (Docker, Vercel, Netlify or Cloudflare Workers — see its README), listening on port `8765`.
+1. Deploy qwen2api yourself (Docker, Vercel, Netlify or Cloudflare Workers — see its README), listening on port `8765`.
 2. In the dashboard, hit **Add Qwen (qwen2api) provider** — or `POST /api/providers/preset/qwen`.
 3. No account needed: if your qwen2api has no `API_TOKENS` set, requests forward without a key. If it does, add an account on the `qwen` provider with the token.
 
@@ -199,6 +199,38 @@ The Settings section has **Export backup** (downloads a JSON with accounts, prov
 ### Error-spike alerts
 
 When `ALERT_WEBHOOK_URL` is set, a background check watches the error rate: if it reaches `ERROR_SPIKE_THRESHOLD` (default 0.5) over the last `ERROR_SPIKE_WINDOW_MIN` minutes (default 10) with at least `ERROR_SPIKE_MIN_REQUESTS` requests (default 10), you get a webhook ping. Same 15-minute dedupe as the other alerts.
+
+### Client API tokens
+
+`CLIENT_TOKENS` (comma-separated, or the dashboard's Settings section) locks down `/v1/*`: clients must present one of the tokens as a `Bearer` token or via the `x-api-key` header. Empty (default) keeps the proxy open. Tokens are never shown back — the dashboard only reports how many are configured, with a one-click clear.
+
+### Token usage per account
+
+The proxy sniffs `usage` out of upstream responses — plain JSON bodies and the final SSE chunk alike — without touching the bytes the client receives. The Overview dashboard shows a **Token usage** panel (prompt / completion / total per account key), and `GET /api/usage?hours=24` exposes per-account and per-model totals as JSON.
+
+### Graceful shutdown
+
+On SIGTERM/SIGINT the server stops accepting new connections and drains in-flight requests (up to `SHUTDOWN_DRAIN_MS`, default 30s) before exiting, so proxied streams aren't cut mid-response. Idle keep-alive sockets are destroyed after the drain.
+
+### Per-model timeouts
+
+`MODEL_TIMEOUTS` (JSON, e.g. `{"*-thinking": 600000, "qwen-flash": 30000}`) overrides the global `REQUEST_TIMEOUT_MS` per model — exact name match wins, then glob patterns. Useful for slow reasoning models that need minutes while fast models stay snappy. Also fixed: no more pointless backoff sleep after the retry budget is spent.
+
+### Provider health
+
+The Overview dashboard's **Provider health** panel shows per-provider request volume, success rate, average latency and the last error (status + time) over the last 24h — `GET /api/metrics/providers?hours=24` as JSON.
+
+### File logging
+
+`LOG_FILE` (env or dashboard) mirrors all console output to a file with timestamps and size-based rotation (`LOG_MAX_MB`, default 10, keeping `LOG_KEEP` generations, default 3). Changes apply live from the dashboard — no restart needed. Handy for auto-start / tray mode where stdout goes nowhere.
+
+### Prometheus metrics
+
+`GET /metrics` exposes counters and gauges in Prometheus exposition format — requests, successes, rate limits, rotations, retries, failovers, tokens saved, uptime, plus per-account request and in-flight series. Point Prometheus/Grafana at it.
+
+### CORS & models caching
+
+`/v1/*` answers CORS preflights and sets permissive CORS headers so browser-based clients can call the proxy directly. The aggregated `/v1/models` list is cached for 60s instead of fanning out to every provider on each call — and the account slot it borrows is now properly released (previously each call leaked an in-flight slot).
 
 ## 🐳 Docker
 
@@ -296,6 +328,12 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | `ERROR_SPIKE_THRESHOLD` | `0.5` | Error rate (0–1) that triggers a spike alert |
 | `ERROR_SPIKE_WINDOW_MIN` | `10` | Minutes over which the spike rate is measured |
 | `ERROR_SPIKE_MIN_REQUESTS` | `10` | Min requests in the window before a spike can trigger |
+| `CLIENT_TOKENS` | _(empty)_ | Comma-separated client API tokens for `/v1/*` (empty = open) |
+| `MODEL_TIMEOUTS` | `{}` | JSON map of model name/glob → timeout ms, e.g. `{"*-thinking":600000}` |
+| `LOG_FILE` | _(empty)_ | Mirror console output to this file (empty = stdout only) |
+| `LOG_MAX_MB` | `10` | Rotate the log file after this many MB |
+| `LOG_KEEP` | `3` | Rotated log generations to keep |
+| `SHUTDOWN_DRAIN_MS` | `30000` | Max wait for in-flight requests on SIGTERM/SIGINT |
 
 `accounts.json` — array of `{ id, name, provider, apiKey, priority, cooldownPeriod?, baseUrl? }`.
 `proxies.json` — array (or `{ "proxies": [...] }`) of `http://user:pass@host:port` URLs.
@@ -312,12 +350,12 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | `/v1/rotate` | `POST` | Manual egress IP rotation |
 | `/health` | `GET` | Liveness + pool summary |
 
-**Admin API** (`/api/*`, token-guarded when `ADMIN_TOKEN` is set): `/api/status`, `/api/metrics`, `/api/metrics/history`, `/api/accounts`, `/api/accounts/validate`, `/api/accounts/:id/reset`, `/api/proxies`, `/api/rotate`, `/api/settings`.
+**Admin API** (`/api/*`, token-guarded when `ADMIN_TOKEN` is set): `/api/status`, `/api/metrics`, `/metrics` (Prometheus), `/api/metrics/history`, `/api/metrics/models`, `/api/metrics/providers`, `/api/usage`, `/api/requests`, `/api/accounts`, `/api/accounts/validate`, `/api/accounts/:id/reset`, `/api/proxies`, `/api/rotate`, `/api/settings`, `/api/backup`, `/api/backup/restore`.
 
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 34 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 133 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
