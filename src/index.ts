@@ -1,5 +1,6 @@
 import dns from 'node:dns/promises';
 import { exec } from 'node:child_process';
+import type { Socket } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import { AccountPool } from './accountPool.js';
@@ -17,6 +18,7 @@ import { Alerter } from './alerts.js';
 import { SessionManager } from './sessionManager.js';
 import { QuotaTracker } from './quota.js';
 import { getSettings } from './settings.js';
+import { inflightTracker, waitForDrain, drainTimeoutMs } from './shutdown.js';
 import { initTray, isTraySupported } from './tray.js';
 
 function printHelp(): void {
@@ -157,6 +159,11 @@ async function main(): Promise<void> {
   app.disable('x-powered-by');
   app.use(express.raw({ type: () => true, limit: '25mb' }));
 
+  // In-flight request tracking for graceful shutdown — first so every
+  // request is counted before any router handles it.
+  const tracker = inflightTracker();
+  app.use(tracker.middleware);
+
   // Dashboard (no build step — static files).
   app.use('/dashboard', express.static(dashboardRoot(), { index: 'dashboard.html' }));
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(dashboardRoot(), 'dashboard.html')));
@@ -183,11 +190,29 @@ async function main(): Promise<void> {
     if (flags.open) openBrowser(`http://127.0.0.1:${port}/dashboard`);
   });
 
+  // Track open sockets so shutdown can destroy idle keep-alive connections.
+  const openSockets = new Set<Socket>();
+  server.on('connection', (s) => {
+    openSockets.add(s);
+    s.on('close', () => openSockets.delete(s));
+  });
+
+  let shuttingDown = false;
   const shutdown = (): void => {
-    console.log('\nshutting down…');
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log('\nshutting down — draining in-flight requests…');
     rotator.stopHealthChecks();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 1500).unref();
+    clearInterval(quotaPruneTimer);
+    server.close(); // stop accepting new connections
+    const drainMs = drainTimeoutMs();
+    void (async () => {
+      const drained = await waitForDrain(() => tracker.inFlight() === 0, drainMs);
+      // Idle keep-alive sockets would hold the event loop open — destroy them.
+      for (const s of openSockets) s.destroy();
+      console.log(drained ? 'drained — goodbye' : `drain timed out after ${drainMs}ms — forcing exit`);
+      process.exit(0);
+    })();
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
