@@ -388,5 +388,95 @@ $('#btnCopy').onclick = () => {
   });
 };
 
-loadProxies(); loadSettings(); refresh();
+// ---- Providers ----
+let upProviders = [];
+async function loadUpProviders() {
+  try {
+    const { providers } = await (await api('/api/providers')).json();
+    upProviders = providers || [];
+    $('#providerUpList').innerHTML = upProviders.map((p) => `
+      <li>
+        <span><strong>${esc(p.name)}</strong> <span class="hint">${esc(p.baseUrl)}</span><br>
+        <span class="hint">models: ${esc((p.models || []).join(', '))}</span>
+        <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></span>
+        <span class="row-btns">
+          <button class="btn" data-ptest="${esc(p.id)}">Test</button>
+          <button class="btn" data-ptoggle="${esc(p.id)}">${p.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn danger" data-pdel="${esc(p.id)}">Remove</button>
+        </span>
+      </li>`).join('') || '<li class="hint">no providers</li>';
+    $('#providerUpList').querySelectorAll('[data-ptoggle]').forEach((b) => b.onclick = async () => {
+      const cur = upProviders.find((x) => x.id === b.dataset.ptoggle);
+      await api('/api/providers/' + encodeURIComponent(cur.id), { method: 'PUT', body: JSON.stringify({ ...cur, enabled: !cur.enabled }) });
+      loadUpProviders();
+    });
+    $('#providerUpList').querySelectorAll('[data-pdel]').forEach((b) => b.onclick = async () => {
+      if (!confirm(`Remove provider ${b.dataset.pdel}? Its accounts will stop routing.`)) return;
+      const r = await api('/api/providers/' + encodeURIComponent(b.dataset.pdel), { method: 'DELETE' });
+      if (!r.ok) alert('Failed: ' + (await r.text()).slice(0, 160));
+      loadUpProviders();
+    });
+    $('#providerUpList').querySelectorAll('[data-ptest]').forEach((b) => b.onclick = async () => {
+      b.disabled = true; b.textContent = '…';
+      try {
+        const t = await (await api('/api/providers/' + encodeURIComponent(b.dataset.ptest) + '/test', { method: 'POST' })).json();
+        b.textContent = t.ok ? `✓ ${t.models} models` : `✕ ${t.error || 'failed'}`;
+      } catch { b.textContent = '✕ error'; }
+      setTimeout(() => { b.disabled = false; b.textContent = 'Test'; }, 2500);
+    });
+    // account form provider dropdown
+    const sel = $('#accountProvider');
+    if (sel) sel.innerHTML = upProviders.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  } catch { /* ignore */ }
+}
+
+$('#providerForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#providerMsg');
+  const r = await api('/api/providers', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: f.id.value.trim(), name: f.name.value.trim(),
+      baseUrl: f.baseUrl.value.trim(),
+      models: f.models.value.split(',').map((s) => s.trim()).filter(Boolean),
+    }),
+  });
+  if (r.ok) { f.reset(); msg.textContent = '✓ Provider added.'; loadUpProviders(); }
+  else msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
+};
+
+$('#qwenPresetBtn').onclick = async () => {
+  const msg = $('#providerMsg');
+  const r = await api('/api/providers/preset/qwen', { method: 'POST' });
+  msg.textContent = r.ok ? '✓ Qwen provider added — point your qwen2api at :8765.' : '✕ ' + (await r.text()).slice(0, 200);
+  loadUpProviders();
+};
+
+// ---- Manual account add ----
+$('#accountForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#accountMsg');
+  try {
+    const list = await (await api('/api/accounts')).json();
+    const ids = new Set((list.accounts || []).map((a) => a.id));
+    const prefix = f.provider.value === 'opencode-zen' ? 'zen' : f.provider.value.replace(/[^a-z0-9]/gi, '');
+    let n = 1;
+    while (ids.has(`${prefix}-${n}`)) n++;
+    const r = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: `${prefix}-${n}`, name: f.name.value.trim() || `${f.provider.value} ${n}`,
+        provider: f.provider.value, apiKey: f.apiKey.value, priority: Number(f.priority.value) || n,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+    msg.textContent = `✓ Account added to ${f.provider.value}.`;
+    f.reset();
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err.message || err).slice(0, 160);
+  }
+};
+
+loadProxies(); loadSettings(); loadUpProviders(); refresh();
 setInterval(refresh, 3000);
