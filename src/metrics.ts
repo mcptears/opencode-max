@@ -157,4 +157,46 @@ export class Metrics {
   recentEvents(limit = 50): MetricEvent[] {
     return this.events.slice(0, limit);
   }
+
+  /** Per-model usage over the last N hours: requests, errors, avg latency. */
+  modelStats(
+    hours = 24,
+    providerOf: (accountId: string) => string = () => '',
+  ): { model: string; provider: string; requests: number; errors: number; avgLatencyMs: number }[] {
+    try {
+      const since = Date.now() - hours * 3600_000;
+      const rows = getDb()
+        .prepare(
+          `SELECT model, account_id AS accountId, COUNT(*) AS requests,
+                  SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+                  AVG(latency_ms) AS avgLatency
+           FROM request_log WHERE ts > ? AND model IS NOT NULL
+           GROUP BY model, account_id ORDER BY requests DESC LIMIT 100`,
+        )
+        .all(since) as unknown as { model: string; accountId: string; requests: number; errors: number; avgLatency: number }[];
+      // Merge rows of the same model across accounts, keeping the top provider.
+      const byModel = new Map<string, { requests: number; errors: number; latencySum: number; providers: Map<string, number> }>();
+      for (const r of rows) {
+        let m = byModel.get(r.model);
+        if (!m) {
+          m = { requests: 0, errors: 0, latencySum: 0, providers: new Map() };
+          byModel.set(r.model, m);
+        }
+        m.requests += r.requests;
+        m.errors += r.errors;
+        m.latencySum += (r.avgLatency ?? 0) * r.requests;
+        const p = providerOf(r.accountId) || 'unknown';
+        m.providers.set(p, (m.providers.get(p) ?? 0) + r.requests);
+      }
+      return [...byModel.entries()].map(([model, m]) => ({
+        model,
+        provider: [...m.providers.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'unknown',
+        requests: m.requests,
+        errors: m.errors,
+        avgLatencyMs: Math.round(m.latencySum / Math.max(1, m.requests)),
+      }));
+    } catch {
+      return [];
+    }
+  }
 }
