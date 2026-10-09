@@ -10,6 +10,7 @@ import type { QuotaTracker } from './quota.js';
 import { UpstreamClient } from './upstreamClient.js';
 import type { Alerter } from './alerts.js';
 import { matchProvider, defaultProvider, type ProviderConfig } from './providers.js';
+import { getSettings } from './settings.js';
 
 /**
  * Abort the upstream fetch if the client goes away mid-request.
@@ -40,6 +41,22 @@ export function extractModel(bodyText: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Client token auth for /v1/*. When clientTokens is empty (default) the proxy
+ * is open; otherwise clients must present one of the tokens as a Bearer token
+ * or via the x-api-key header. OPTIONS preflights always pass through.
+ */
+export function clientTokenAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (req.method === 'OPTIONS') return next();
+  const tokens = getSettings().clientTokens;
+  if (tokens.length === 0) return next();
+  const auth = req.headers['authorization'];
+  const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  const apiKey = typeof req.headers['x-api-key'] === 'string' ? (req.headers['x-api-key'] as string).trim() : '';
+  if ((bearer && tokens.includes(bearer)) || (apiKey && tokens.includes(apiKey))) return next();
+  res.status(401).json({ error: { message: 'missing or invalid client token', status: 401 } });
+}
+
 export function buildRouter(
   pool: AccountPool,
   rotator: IpRotator,
@@ -51,6 +68,8 @@ export function buildRouter(
 ): Router {
   const router = Router();
   const upstream = new UpstreamClient(pool, rotator, sessions, metrics, quota, getProviders, alerter);
+
+  router.use('/v1', clientTokenAuth);
 
   router.get('/health', (_req, res) => {
     res.json({
@@ -99,9 +118,6 @@ export function buildRouter(
 
       res.status(result.status);
       for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, v);
-      const __tSend = Date.now();
-      res.on('finish', () => {
-      });
       if (result.body) {
         Readable.fromWeb(result.body as unknown as NodeWebStream).pipe(res);
       } else {
