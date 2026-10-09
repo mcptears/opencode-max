@@ -39,6 +39,7 @@ async function refresh() {
     renderStatus(await res.json());
     drawTraffic();
     loadModels();
+    loadRequests();
   } catch {
     $('#statusPill').textContent = 'offline';
     $('#statusPill').className = 'pill';
@@ -117,6 +118,18 @@ async function loadModels() {
       return `<tr><td><code>${esc(m.model)}</code></td><td>${esc(m.provider)}</td><td>${m.requests}</td>` +
         `<td>${m.errors} <span class="hint">(${errPct}%)</span></td><td>${m.avgLatencyMs}<small> ms</small></td></tr>`;
     }).join('') || '<tr><td colspan="5" class="hint">no requests yet</td></tr>';
+  } catch { /* ignore */ }
+}
+
+async function loadRequests() {
+  try {
+    const { requests } = await (await api('/api/requests?limit=30')).json();
+    $('#requestsTbl tbody').innerHTML = (requests || []).map((r) => {
+      const time = new Date(r.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const cls = r.status >= 500 ? 'tag bad' : r.status >= 400 ? 'tag warn' : 'tag ok';
+      return `<tr><td>${time}</td><td><code>${esc(r.model || '—')}</code></td><td>${esc(r.provider)}</td>` +
+        `<td><code>${esc(r.accountId)}</code></td><td><span class="${cls}">${r.status}</span></td><td>${r.latencyMs}<small> ms</small></td></tr>`;
+    }).join('') || '<tr><td colspan="6" class="hint">no requests yet</td></tr>';
   } catch { /* ignore */ }
 }
 
