@@ -49,9 +49,11 @@ async function refresh() {
 }
 
 function accountRows(s, withActions) {
-  const limit = s.quota5hLimit || 200;
+  const globalLimit = s.quota5hLimit || 200;
   return s.accounts.map((a) => {
     const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}" style="margin-left:6px">Reset</button>` : '';
+    const editBtn = withActions ? `<button class="btn" data-edit="${esc(a.id)}" style="margin-left:6px">Edit</button>` : '';
+    const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
     const usageCell = `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span>${a.inflight > 0 ? ` <span class="hint">· ${a.inflight} in flight</span>` : ''}</td>`;
     const latencyCell = `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>`;
@@ -61,7 +63,7 @@ function accountRows(s, withActions) {
     return `<tr>${cells}
       <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
       <td>${fmtMs(a.cooldownEndsInMs)}</td>
-      ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button>${resetBtn}</td>` : ''}</tr>`;
+      ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button>${editBtn}${resetBtn}</td>` : ''}</tr>`;
   }).join('');
 }
 
@@ -162,6 +164,7 @@ async function loadRequests() {
 }
 
 function renderStatus(s) {
+  window._lastStatus = s;
   const active = s.accounts.filter((a) => a.state === 'active').length;
   $('#statusPill').textContent = `● live · ${active}/${s.accounts.length} accounts`;
   $('#statusPill').className = 'pill on';
@@ -188,6 +191,7 @@ function renderStatus(s) {
     await api('/api/accounts/' + encodeURIComponent(b.dataset.reset) + '/reset', { method: 'POST' });
     refresh();
   });
+  tb.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openAccountEdit(b.dataset.edit));
 
   $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
   const health = window._health || [];
@@ -244,7 +248,7 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails', 'errorSpikeThreshold', 'errorSpikeWindowMin', 'errorSpikeMinRequests', 'logFile', 'logMaxMb', 'logKeep']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails', 'errorSpikeThreshold', 'errorSpikeWindowMin', 'errorSpikeMinRequests', 'logFile', 'logMaxMb', 'logKeep', 'shutdownDrainMs']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
@@ -470,7 +474,7 @@ $('#scrapeBtn').onclick = async () => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails', 'errorSpikeThreshold', 'errorSpikeWindowMin', 'errorSpikeMinRequests', 'logMaxMb', 'logKeep']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs', 'accountConcurrency', 'proxyAutoDropFails', 'errorSpikeThreshold', 'errorSpikeWindowMin', 'errorSpikeMinRequests', 'logMaxMb', 'logKeep', 'shutdownDrainMs']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   // logFile is always sent (empty clears it) so file logging can be turned off.
@@ -553,9 +557,11 @@ async function loadUpProviders() {
       } catch { b.textContent = '✕ error'; }
       setTimeout(() => { b.disabled = false; b.textContent = 'Test'; }, 2500);
     });
-    // account form provider dropdown
+    // account form provider dropdowns
     const sel = $('#accountProvider');
     if (sel) sel.innerHTML = upProviders.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    const esel = $('#editAccountProvider');
+    if (esel) esel.innerHTML = upProviders.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   } catch { /* ignore */ }
 }
 
@@ -581,6 +587,50 @@ $('#qwenPresetBtn').onclick = async () => {
   loadUpProviders();
 };
 
+// ---- Account edit modal ----
+function openAccountEdit(id) {
+  const a = (window._lastStatus?.accounts || []).find((x) => x.id === id);
+  if (!a) return;
+  const f = $('#accountEditForm');
+  $('#editAccountId').textContent = a.id;
+  f.name.value = a.name || '';
+  if (f.provider) f.provider.value = a.provider || '';
+  f.apiKey.value = '';
+  f.clearApiKey.checked = false;
+  f.priority.value = a.priority ?? 1;
+  f.cooldownPeriod.value = a.cooldownPeriod ?? '';
+  f.baseUrl.value = a.baseUrl ?? '';
+  f.quotaLimit.value = a.quotaLimit ?? '';
+  $('#accountEditMsg').textContent = '';
+  $('#accountEditModal').hidden = false;
+}
+
+$('#accountEditClose').onclick = () => { $('#accountEditModal').hidden = true; };
+
+$('#accountEditForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#accountEditMsg');
+  const id = $('#editAccountId').textContent;
+  const body = {
+    name: f.name.value.trim(),
+    provider: f.provider.value,
+    apiKey: f.apiKey.value,
+    clearApiKey: !!f.clearApiKey.checked,
+    priority: Number(f.priority.value) || 1,
+  };
+  if (f.cooldownPeriod.value !== '') body.cooldownPeriod = Number(f.cooldownPeriod.value);
+  if (f.baseUrl.value.trim() !== '') body.baseUrl = f.baseUrl.value.trim();
+  if (f.quotaLimit.value !== '') body.quotaLimit = Number(f.quotaLimit.value);
+  const r = await api('/api/accounts/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(body) });
+  if (r.ok) {
+    msg.textContent = '✓ Saved.';
+    $('#accountEditModal').hidden = true;
+    refresh();
+  } else {
+    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
+  }
+};
+
 // ---- Manual account add ----
 $('#accountForm').onsubmit = async (e) => {
   e.preventDefault();
@@ -596,6 +646,9 @@ $('#accountForm').onsubmit = async (e) => {
       body: JSON.stringify({
         id: `${prefix}-${n}`, name: f.name.value.trim() || `${f.provider.value} ${n}`,
         provider: f.provider.value, apiKey: f.apiKey.value, priority: Number(f.priority.value) || n,
+        cooldownPeriod: f.cooldownPeriod.value !== '' ? Number(f.cooldownPeriod.value) : undefined,
+        baseUrl: f.baseUrl.value.trim() || undefined,
+        quotaLimit: f.quotaLimit.value !== '' ? Number(f.quotaLimit.value) : undefined,
       }),
     });
     if (!r.ok) throw new Error((await r.text()).slice(0, 160));
