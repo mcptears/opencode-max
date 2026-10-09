@@ -1,4 +1,5 @@
 import { Agent, ProxyAgent } from 'undici';
+import { getSettings } from './settings.js';
 
 /** Hide credentials when displaying proxy URLs. */
 export function redactProxy(url: string): string {
@@ -22,6 +23,18 @@ export interface ProxyHealth {
   healthy: boolean;
   fails: number;
   lastCheckedAgoMs: number;
+  /** Real-traffic quality: successful / failed request counts via this proxy. */
+  qualityOk: number;
+  qualityFail: number;
+  /** EMA of successful request latency through this proxy (ms, 0 when unknown). */
+  qualityLatencyMs: number;
+}
+
+export interface ProxyQuality {
+  ok: number;
+  fail: number;
+  consecFails: number;
+  latencyEma: number;
 }
 
 /**
@@ -51,6 +64,9 @@ export class IpRotator {
   rotations = 0;
   /** Called on healthy<->unhealthy transitions (wired to metrics). */
   onHealthChange: ((proxy: string, healthy: boolean) => void) | null = null;
+  /** Called when a proxy is auto-dropped after repeated real-request failures. */
+  onProxyDropped: ((proxy: string, consecFails: number) => void) | null = null;
+  private readonly quality = new Map<string, ProxyQuality>();
 
   constructor(proxies: string[]) {
     this.proxies = proxies;
@@ -76,6 +92,11 @@ export class IpRotator {
 
   get count(): number {
     return this.proxies.length;
+  }
+
+  /** Raw (unredacted) proxy list — for persistence after auto-drop. */
+  rawProxies(): string[] {
+    return [...this.proxies];
   }
 
   /** Proxies eligible for rotation (healthy ones; all of them if none are healthy). */
@@ -113,7 +134,51 @@ export class IpRotator {
     for (const key of [...this.health.keys()]) {
       if (!proxies.includes(key)) this.health.delete(key);
     }
+    for (const key of [...this.quality.keys()]) {
+      if (!proxies.includes(key)) this.quality.delete(key);
+    }
     if (this.index >= this.proxies.length) this.index = 0;
+  }
+
+  /**
+   * Record a real-traffic result for a proxy. `ok=false` means the request
+   * never reached upstream (network failure/timeout) — the proxy's fault.
+   * HTTP 429/5xx responses are NOT proxy faults (upstream was reached).
+   * Proxies with too many consecutive failures are auto-dropped (unless
+   * they'd be the last one left).
+   */
+  recordProxyResult(proxy: string, ok: boolean, latencyMs: number): void {
+    let q = this.quality.get(proxy);
+    if (!q) {
+      q = { ok: 0, fail: 0, consecFails: 0, latencyEma: 0 };
+      this.quality.set(proxy, q);
+    }
+    if (ok) {
+      q.ok += 1;
+      q.consecFails = 0;
+      q.latencyEma = q.latencyEma > 0 ? Math.round(q.latencyEma * 0.7 + latencyMs * 0.3) : Math.round(latencyMs);
+    } else {
+      q.fail += 1;
+      q.consecFails += 1;
+      const threshold = getSettings().proxyAutoDropFails;
+      if (threshold > 0 && q.consecFails >= threshold && this.proxies.length > 1 && this.proxies.includes(proxy)) {
+        this.proxies = this.proxies.filter((p) => p !== proxy);
+        this.agentCache.delete(proxy);
+        this.health.delete(proxy);
+        this.quality.delete(proxy);
+        if (this.index >= this.proxies.length) this.index = 0;
+        try {
+          this.onProxyDropped?.(proxy, q.consecFails);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  /** Quality stats for one proxy (dashboard). */
+  qualityOf(proxy: string): ProxyQuality | null {
+    return this.quality.get(proxy) ?? null;
   }
 
   /** Dispatcher for one upstream request: a proxy agent, or a direct agent pinned to the current IP family. */
@@ -155,11 +220,15 @@ export class IpRotator {
       dualStack: this.dualStack,
       health: this.proxies.map((p) => {
         const h = this.health.get(p);
+        const q = this.quality.get(p);
         return {
           proxy: redactProxy(p),
           healthy: h?.healthy !== false,
           fails: h?.fails ?? 0,
           lastCheckedAgoMs: h ? Math.max(0, now - h.lastChecked) : -1,
+          qualityOk: q?.ok ?? 0,
+          qualityFail: q?.fail ?? 0,
+          qualityLatencyMs: q?.latencyEma ?? 0,
         };
       }),
     };
