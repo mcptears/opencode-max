@@ -3,7 +3,7 @@ import type { AccountPool } from './accountPool.js';
 import type { IpRotator } from './ipRotator.js';
 import type { Metrics } from './metrics.js';
 import { sanitizeHeaders, sanitizePayload } from './sanitizer.js';
-import { getSettings } from './settings.js';
+import { getSettings, resolveModelTimeout } from './settings.js';
 import type { SessionManager } from './sessionManager.js';
 
 /** Thrown when one provider can't serve the request; forward() fails over to the next. */
@@ -262,7 +262,9 @@ export class UpstreamClient {
       let upstream: Response;
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), getSettings().requestTimeoutMs);
+        const s = getSettings();
+        const timeoutMs = resolveModelTimeout(s.modelTimeouts, model, s.requestTimeoutMs);
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
         const onAbort = (): void => controller.abort();
         req.signal?.addEventListener('abort', onAbort, { once: true });
         try {
@@ -281,7 +283,8 @@ export class UpstreamClient {
         lastError = e; // network-level failure: back off and retry
         if (proxy) this.rotator.recordProxyResult(proxy, false, 0);
         this.pool.release(account.id);
-        await sleep(backoff(attempt));
+        // No point sleeping when the retry budget is spent — fail fast.
+        if (attempt < maxRetries) await sleep(backoff(attempt));
         continue;
       }
 
