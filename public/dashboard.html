@@ -103,6 +103,24 @@
         </div>
       </div>
 
+      <div class="modal-backdrop" id="qwenConnectModal" hidden>
+        <div class="modal">
+          <div class="modal-head"><h3>Connect Qwen account</h3><button class="btn" id="qwenConnectClose">✕</button></div>
+          <ol class="steps">
+            <li><strong>Sign in</strong> at <a href="https://chat.qwen.ai" target="_blank" rel="noopener">chat.qwen.ai</a> in your browser.</li>
+            <li><strong>Copy your token:</strong> open DevTools (F12) → Console → run <code>localStorage.getItem("token")</code> and copy the value (no quotes).</li>
+            <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
+          </ol>
+          <form id="qwenConnectForm" class="form-grid">
+            <label>Display name<input name="name" placeholder="e.g. Qwen main"></label>
+            <label>Qwen token <span class="hint">or full Cookie header</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+            <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+            <button class="btn primary" type="submit">Validate &amp; connect</button>
+          </form>
+          <div id="qwenConnectMsg" class="hint"></div>
+        </div>
+      </div>
+
       <div class="modal-backdrop" id="connectModal" hidden>
         <div class="modal">
           <div class="modal-head"><h3>Connect OpenCode account</h3><button class="btn" id="connectClose">✕</button></div>
@@ -140,13 +158,26 @@
           <form id="providerForm" class="form-grid">
             <input name="id" placeholder="id · e.g. qwen" required pattern="[A-Za-z0-9][A-Za-z0-9-_]*">
             <input name="name" placeholder="display name · e.g. Qwen">
-            <input name="baseUrl" placeholder="base URL · e.g. http://127.0.0.1:8765/v1" required style="grid-column:span 2">
+            <input name="baseUrl" placeholder="base URL · e.g. https://api.example.com/v1" required style="grid-column:span 2">
             <input name="models" placeholder="model globs, comma-separated · e.g. qwen*" style="grid-column:span 2">
+            <label>Protocol
+              <select name="protocol" id="providerProtocol">
+                <option value="openai">OpenAI-compatible</option>
+                <option value="qwen-web">Qwen web (built-in)</option>
+              </select>
+            </label>
+            <div id="qwenOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+              <input name="qwenDefaultModel" placeholder="Qwen web model id · e.g. qwen3.7-plus">
+              <textarea name="qwenModelMap" rows="2" placeholder='model map JSON · e.g. {"qwen-max": "qwen3.7-max"}' spellcheck="false"></textarea>
+            </div>
             <button class="btn primary" type="submit">Add provider</button>
           </form>
-          <h4 class="sub">Qwen via qwen2api <span class="hint">free Qwen chat as an OpenAI-compatible API</span></h4>
-          <p class="hint">Deploy qwen2api yourself (Docker, Vercel, Netlify or Cloudflare Workers — see its README), listening on port 8765. No API key needed unless you set <code>API_TOKENS</code> on it. Then:</p>
-          <div><button class="btn primary" id="qwenPresetBtn">Add Qwen (qwen2api) provider</button></div>
+          <h4 class="sub">Qwen (built-in) <span class="hint">free Qwen chat — no separate deployment</span></h4>
+          <p class="hint">Qwen runs natively inside opencode-max. Add the provider, then connect your Qwen account — paste the token from <code>chat.qwen.ai</code> (DevTools console: <code>localStorage.getItem("token")</code>).</p>
+          <div class="connect-row">
+            <button class="btn primary" id="qwenPresetBtn">Add Qwen provider</button>
+            <button class="btn" id="qwenConnectBtn">Connect Qwen account</button>
+          </div>
           <div id="providerMsg" class="hint"></div>
         </div>
       </section>
