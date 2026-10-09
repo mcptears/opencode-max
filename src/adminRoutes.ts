@@ -8,8 +8,9 @@ import type { SessionManager } from './sessionManager.js';
 import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parseModelTimeouts } from './settings.js';
 import { reinitFileLogger } from './logger.js';
 import { renderPrometheus } from './prometheus.js';
-import { validateQwenCredential } from './qwenWeb.js';
+import { validateQwenCredential, qwenSignIn } from './qwenWeb.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
+import { createHash } from 'node:crypto';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
 import type { ScraperJob } from './scraperJob.js';
@@ -163,6 +164,55 @@ export function buildAdminRouter(ctx: AdminContext): Router {
         : (loadProviders().find((p) => p.protocol === 'qwen-web')?.baseUrl ?? 'https://chat.qwen.ai');
     const r = await validateQwenCredential(base, credential);
     res.json(r);
+  });
+
+  /**
+   * Sign in to Qwen with email + password and connect the account in one
+   * step — no DevTools needed. The browser should SHA-256 the password
+   * first (it never needs to send the plaintext); if it sends `password`
+   * instead, the server hashes it before forwarding. The password is never
+   * stored — only the Qwen session credential lands in the account pool.
+   */
+  router.post('/api/accounts/qwen-login', async (req, res) => {
+    const body = jsonBody(req) as { email?: unknown; passwordHash?: unknown; password?: unknown; name?: unknown; priority?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    let passwordHash = typeof body.passwordHash === 'string' ? body.passwordHash.trim() : '';
+    if (!passwordHash && typeof body.password === 'string' && body.password) {
+      passwordHash = createHash('sha256').update(body.password).digest('hex');
+    }
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ ok: false, error: 'a valid email is required' });
+      return;
+    }
+    if (!/^[0-9a-f]{64}$/i.test(passwordHash)) {
+      res.status(400).json({ ok: false, error: 'password is required' });
+      return;
+    }
+    // Make sure the native Qwen provider exists so the account has a home.
+    const providers = loadProviders();
+    let qwenProvider = providers.find((p) => p.protocol === 'qwen-web');
+    if (!qwenProvider) {
+      providers.push({ ...QWEN_PRESET });
+      saveProviders(providers);
+      qwenProvider = providers[providers.length - 1];
+      metrics.record('settings', 'native qwen provider preset added (via Qwen sign-in)');
+    }
+    const login = await qwenSignIn(qwenProvider.baseUrl, email, passwordHash);
+    if (!login.ok) {
+      res.json(login);
+      return;
+    }
+    const accounts = readAccounts();
+    let n = 1;
+    while (accounts.some((a) => a.id === `qwen-${n}`)) n++;
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : email.split('@')[0];
+    const priority = typeof body.priority === 'number' && Number.isFinite(body.priority) ? body.priority : n;
+    const account: AccountConfig = { id: `qwen-${n}`, name, provider: qwenProvider.id, apiKey: login.credential, priority };
+    accounts.push(account);
+    writeAccounts(accounts);
+    pool.replace(accounts);
+    metrics.record('account_added', `qwen account '${account.id}' connected via sign-in`);
+    res.status(201).json({ ok: true, id: account.id });
   });
 
   /** Check an API key against upstream without adding it (Connect flow).
