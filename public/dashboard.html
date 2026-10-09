@@ -193,6 +193,7 @@
             <label>Queue wait cap (ms)<input name="queueMaxWaitMs" type="number" min="0" placeholder="30000"></label>
             <label>Max parallel requests / account<input name="accountConcurrency" type="number" min="0" placeholder="4"></label>
             <label>Auto-drop proxy after N fails<input name="proxyAutoDropFails" type="number" min="0" placeholder="5"></label>
+            <label>Model fallbacks (JSON)<textarea name="modelFallbacks" rows="3" placeholder='{"qwen-max": ["qwen-plus"]}' spellcheck="false"></textarea></label>
             <label>Alert webhook URL<input name="alertWebhookUrl" type="password" placeholder="https://… (Telegram Bot API works)" autocomplete="off"></label>
             <label>Request timeout (ms)<input name="requestTimeoutMs" type="number" min="1000"></label>
             <label>Port<input name="port" type="number" min="1" max="65535"></label>
