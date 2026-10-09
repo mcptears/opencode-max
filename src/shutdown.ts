@@ -1,4 +1,5 @@
 import type express from 'express';
+import { getSettings } from './settings.js';
 
 /**
  * Graceful shutdown helpers.
@@ -37,8 +38,8 @@ export function inflightTracker(): { middleware: express.RequestHandler; inFligh
   return { middleware, inFlight: () => count };
 }
 
-/** Drain timeout for graceful shutdown (env override, default 30s). */
+/** Drain timeout for graceful shutdown (dashboard setting, default 30s). */
 export function drainTimeoutMs(): number {
-  const v = Number(process.env.SHUTDOWN_DRAIN_MS);
+  const v = getSettings().shutdownDrainMs;
   return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 30_000;
 }
