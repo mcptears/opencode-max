@@ -118,6 +118,85 @@ async function qwenFetch(baseUrl: string, credential: string, path: string, init
   } as RequestInit & { dispatcher?: unknown });
 }
 
+/** SHA-256 hex digest (used for the sign-in password — the plaintext never leaves the browser). */
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export type QwenLoginResult = { ok: true; credential: string } | { ok: false; error: string };
+
+function parseSetCookie(header: string): { name: string; value: string } | null {
+  const m = /^([^=;]+)=([^;]*)/.exec(header.trim());
+  return m ? { name: m[1].trim(), value: m[2].trim() } : null;
+}
+
+function signinError(status: number, bodyText: string): string {
+  if (status === 401 || status === 403) return 'email or password incorrect';
+  if (status === 429) return 'too many sign-in attempts — wait a bit and retry';
+  const t = bodyText.slice(0, 160);
+  return `qwen sign-in failed (${status})${t ? `: ${t}` : ''}`;
+}
+
+/**
+ * Sign in with a Qwen account — the same call the chat.qwen.ai web frontend
+ * makes. `passwordHash` must be the SHA-256 hex of the password, so the
+ * plaintext password never reaches this server. Only the session credential
+ * (token cookie) is returned; nothing is persisted here.
+ */
+export async function qwenSignIn(
+  baseUrl: string,
+  email: string,
+  passwordHash: string,
+  opts: FetchOpts = {},
+): Promise<QwenLoginResult> {
+  const base = baseUrl.replace(/\/+$/, '');
+  const init: RequestInit = {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      source: 'web',
+      'x-request-id': crypto.randomUUID(),
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+    },
+    body: JSON.stringify({ email, password: passwordHash }),
+  };
+  for (const path of ['/api/v1/auths/signin', '/api/v2/auths/signin']) {
+    let r: Response;
+    try {
+      r = await fetch(`${base}${path}`, { ...init, signal: opts.signal, dispatcher: opts.dispatcher } as RequestInit & {
+        dispatcher?: unknown;
+      });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'network error' };
+    }
+    if (r.status === 404) continue; // endpoint version drift — try the other
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { ok: false, error: signinError(r.status, t) };
+    }
+    // Prefer the token cookie (chat auth rides on Cookie + source: web);
+    // fall back to a token in the JSON body.
+    const rawCookies: string[] =
+      typeof (r.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie === 'function'
+        ? (r.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+        : [];
+    for (const h of rawCookies) {
+      const c = parseSetCookie(h);
+      if (c && c.name.toLowerCase() === 'token' && c.value) {
+        return { ok: true, credential: `token=${c.value}` };
+      }
+    }
+    const j = (await r.json().catch(() => null)) as { token?: unknown } | null;
+    if (j && typeof j.token === 'string' && j.token) {
+      return { ok: true, credential: `token=${j.token}` };
+    }
+    return { ok: false, error: 'sign-in succeeded but Qwen returned no session token' };
+  }
+  return { ok: false, error: 'qwen sign-in endpoint not found' };
+}
+
 /** Lightweight credential check: list chats. 200 = the credential works. */
 export async function validateQwenCredential(
   baseUrl: string,
