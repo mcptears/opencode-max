@@ -57,6 +57,21 @@ import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
 import type { Alerter } from './alerts.js';
 
+/** Rewrite the model name inside a JSON request body (for model fallbacks). */
+function rewriteModel(bodyText: string | undefined, model: string | undefined): string | undefined {
+  if (!bodyText || !model) return bodyText;
+  try {
+    const parsed = JSON.parse(bodyText) as Record<string, unknown>;
+    if (typeof parsed === 'object' && parsed !== null) {
+      parsed.model = model;
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    /* not JSON — leave untouched */
+  }
+  return bodyText;
+}
+
 /** Sleep that resolves early when the client aborts. */
 function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0 || signal?.aborted) return Promise.resolve();
@@ -103,6 +118,9 @@ export class UpstreamClient {
    * are all exhausted (or its upstream is down), try the next eligible
    * provider before giving up. Fallback candidates must be able to serve the
    * model — their patterns match it, or they're a catch-all.
+   * If the model is exhausted on every provider, model fallback chains
+   * (settings.modelFallbacks) are tried next, with the request body rewritten
+   * to the fallback model name.
    */
   async forward(req: ForwardRequest): Promise<ForwardResult> {
     let model: string | undefined;
@@ -114,19 +132,35 @@ export class UpstreamClient {
         /* ignore */
       }
     }
-    const chain = this.providerChain(req.provider, model);
+    // Primary model first, then configured fallbacks (deduped, no cycles).
+    const models: (string | undefined)[] = [model];
+    if (model) {
+      for (const fb of getSettings().modelFallbacks[model] ?? []) {
+        if (fb && !models.includes(fb)) models.push(fb);
+      }
+    }
     let lastError: unknown = null;
-    for (let i = 0; i < chain.length; i++) {
-      try {
-        return await this.forwardToProvider(req, chain[i], model);
-      } catch (e) {
-        if (!(e instanceof ProviderExhaustedError)) throw e;
-        lastError = e;
-        if (i + 1 < chain.length) this.metrics?.failover(chain[i], chain[i + 1]);
+    for (const m of models) {
+      // Fallback models need the request body rewritten to their name.
+      const attemptReq = m === model ? req : { ...req, bodyText: rewriteModel(req.bodyText, m) };
+      const chain = this.providerChain(req.provider, m);
+      for (let i = 0; i < chain.length; i++) {
+        try {
+          const result = await this.forwardToProvider(attemptReq, chain[i], m);
+          if (m !== model) {
+            this.metrics?.record('failover', `model fallback served '${model ?? 'unknown'}' as '${m}' via '${chain[i]}'`);
+          }
+          return result;
+        } catch (e) {
+          if (!(e instanceof ProviderExhaustedError)) throw e;
+          lastError = e;
+          if (i + 1 < chain.length) this.metrics?.failover(chain[i], chain[i + 1]);
+        }
       }
     }
     const detail = lastError instanceof Error ? lastError.message : String(lastError);
-    void this.alerter?.send('pool_exhausted', `all providers exhausted for model '${model ?? 'unknown'}': ${detail.slice(0, 120)}`);
+    const tried = models.filter((m): m is string => !!m).join(' → ');
+    void this.alerter?.send('pool_exhausted', `all providers exhausted for model '${tried || 'unknown'}': ${detail.slice(0, 120)}`);
     throw httpError(502, `all providers exhausted: ${detail}`);
   }
 
