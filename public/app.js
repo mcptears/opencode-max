@@ -238,6 +238,7 @@ async function loadSettings() {
     if (f.autoScrape) f.autoScrape.checked = settings.autoScrape === true;
     if (f.routingStrategy && settings.routingStrategy) f.routingStrategy.value = settings.routingStrategy;
     if (f.modelFallbacks) f.modelFallbacks.value = JSON.stringify(settings.modelFallbacks || {}, null, 1);
+    if (f.modelTimeouts) f.modelTimeouts.value = JSON.stringify(settings.modelTimeouts || {}, null, 1);
     const ctc = $('#clientTokensCount');
     if (ctc) ctc.textContent = settings.clientTokensCount ? `${settings.clientTokensCount} configured` : 'none — proxy is open';
   } catch { /* ignore */ }
@@ -467,6 +468,14 @@ $('#settingsForm').onsubmit = async (e) => {
       body.modelFallbacks = JSON.parse(f.modelFallbacks.value);
     } catch {
       $('#settingsMsg').textContent = 'Save failed: model fallbacks is not valid JSON.';
+      return;
+    }
+  }
+  if (f.modelTimeouts && f.modelTimeouts.value.trim()) {
+    try {
+      body.modelTimeouts = JSON.parse(f.modelTimeouts.value);
+    } catch {
+      $('#settingsMsg').textContent = 'Save failed: model timeouts is not valid JSON.';
       return;
     }
   }
