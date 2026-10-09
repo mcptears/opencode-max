@@ -234,4 +234,47 @@ export class Metrics {
       return [];
     }
   }
+
+  /** Record token usage reported by an upstream response for one request. */
+  logUsage(accountId: string, model: string | undefined, prompt: number, completion: number): void {
+    try {
+      getDb()
+        .prepare('INSERT INTO token_usage (ts, account_id, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, ?)')
+        .run(Date.now(), accountId, model ?? null, Math.max(0, Math.floor(prompt)), Math.max(0, Math.floor(completion)));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Token totals over the last N hours, per account and per model. */
+  usageStats(hours = 24): {
+    byAccount: { accountId: string; prompt: number; completion: number; total: number; requests: number }[];
+    byModel: { model: string; prompt: number; completion: number; total: number; requests: number }[];
+  } {
+    const empty = { byAccount: [], byModel: [] };
+    try {
+      const since = Date.now() - hours * 3600_000;
+      const db = getDb();
+      const byAccount = db
+        .prepare(
+          `SELECT account_id AS accountId, SUM(prompt_tokens) AS prompt, SUM(completion_tokens) AS completion,
+                  COUNT(*) AS requests FROM token_usage WHERE ts > ? GROUP BY account_id ORDER BY prompt DESC`,
+        )
+        .all(since) as unknown as { accountId: string; prompt: number; completion: number; requests: number }[];
+      const byModel = db
+        .prepare(
+          `SELECT model, SUM(prompt_tokens) AS prompt, SUM(completion_tokens) AS completion,
+                  COUNT(*) AS requests FROM token_usage WHERE ts > ? AND model IS NOT NULL
+           GROUP BY model ORDER BY prompt DESC LIMIT 50`,
+        )
+        .all(since) as unknown as { model: string; prompt: number; completion: number; requests: number }[];
+      const withTotal = <T extends { prompt: number; completion: number }>(r: T) => ({
+        ...r,
+        total: (r.prompt ?? 0) + (r.completion ?? 0),
+      });
+      return { byAccount: byAccount.map(withTotal), byModel: byModel.map(withTotal) };
+    } catch {
+      return empty;
+    }
+  }
 }
