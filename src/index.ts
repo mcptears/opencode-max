@@ -19,6 +19,7 @@ import { SessionManager } from './sessionManager.js';
 import { QuotaTracker } from './quota.js';
 import { getSettings } from './settings.js';
 import { inflightTracker, waitForDrain, drainTimeoutMs } from './shutdown.js';
+import { initFileLogger } from './logger.js';
 import { initTray, isTraySupported } from './tray.js';
 
 function printHelp(): void {
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
   const flags = parseArgs();
   if (flags.port) CONFIG.port = flags.port;
   const settings = getSettings();
+  initFileLogger(); // mirror console to logFile when configured
   const port = flags.port ?? settings.port;
 
   const accounts = loadAccounts(CONFIG.accountsFile);
