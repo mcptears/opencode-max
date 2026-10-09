@@ -271,3 +271,55 @@ describe('proxy quality scoring', () => {
     saveSettings({ proxyAutoDropFails: 5 });
   });
 });
+
+describe('model fallback chains', () => {
+  const prov = (id: string, models: string[], base: string) => ({ id, name: id, baseUrl: base, models, enabled: true });
+  const mk = (accounts: { id: string; provider: string }[], providers: { id: string; models: string[]; baseUrl: string }[]) => {
+    const pool = new AccountPool(accounts.map((a) => ({ id: a.id, name: a.id, provider: a.provider, apiKey: 'k', priority: 1 })));
+    const rotator = { current: () => null, dispatcherFor: () => undefined, rotate: () => {}, egressLabel: () => 'd', currentFamily: () => 4 } as never;
+    const sessions = { id: 's', rotate: () => {} } as never;
+    return new UpstreamClient(pool, rotator, sessions, new Metrics(), undefined, () => providers.map((p) => prov(p.id, p.models, p.baseUrl)));
+  };
+
+  it('falls back to the next model when the primary is exhausted', async () => {
+    saveSettings({ maxRetries: 0, retryBaseMs: 1, retryMaxMs: 1, modelFallbacks: { 'm1': ['m2'] } });
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (url: unknown, init: unknown) => {
+      const body = JSON.parse((init as { body: string }).body) as { model: string };
+      seen.push(body.model);
+      if (String(url).includes('down.invalid')) throw new Error('down');
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const client = mk([{ id: 'a', provider: 'p1' }, { id: 'b', provider: 'p2' }], [
+      { id: 'p1', models: ['m1'], baseUrl: 'http://down.invalid/v1' },
+      { id: 'p2', models: ['m2'], baseUrl: 'http://up.invalid/v1' },
+    ]);
+    const res = await client.forward({ method: 'POST', path: '/chat/completions', query: '', headers: {}, bodyText: JSON.stringify({ model: 'm1' }), provider: 'p1' });
+    expect(res.status).toBe(200);
+    // m1 on p1 (down), then m2 on p1 (down, explicit provider tried first), then m2 on p2 (up)
+    expect(seen).toEqual(['m1', 'm2', 'm2']);
+    expect(seen[seen.length - 1]).toBe('m2'); // upstream got the rewritten model name
+    saveSettings({ modelFallbacks: {} });
+  });
+
+  it('502s when no fallback is configured', async () => {
+    saveSettings({ maxRetries: 0, retryBaseMs: 1, retryMaxMs: 1, modelFallbacks: {} });
+    vi.stubGlobal('fetch', async () => { throw new Error('down'); });
+    const client = mk([{ id: 'a', provider: 'p1' }], [{ id: 'p1', models: ['m1'], baseUrl: 'http://down.invalid/v1' }]);
+    await expect(
+      client.forward({ method: 'POST', path: '/chat/completions', query: '', headers: {}, bodyText: JSON.stringify({ model: 'm1' }), provider: 'p1' }),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('does not loop on cyclic fallback config', async () => {
+    saveSettings({ maxRetries: 0, retryBaseMs: 1, retryMaxMs: 1, modelFallbacks: { 'm1': ['m2'], 'm2': ['m1'] } });
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls++; throw new Error('down'); });
+    const client = mk([{ id: 'a', provider: 'p1' }], [{ id: 'p1', models: ['*'], baseUrl: 'http://down.invalid/v1' }]);
+    await expect(
+      client.forward({ method: 'POST', path: '/chat/completions', query: '', headers: {}, bodyText: JSON.stringify({ model: 'm1' }), provider: 'p1' }),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(calls).toBe(2); // m1 then m2, then stop — no infinite loop
+    saveSettings({ modelFallbacks: {} });
+  });
+});
