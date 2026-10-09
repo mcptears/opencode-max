@@ -25,6 +25,12 @@ export interface Settings {
   /** Periodically re-scrape free proxy providers to keep the pool fresh. */
   autoScrape: boolean;
   autoScrapeIntervalHours: number;
+  /** Account selection: 'priority' (P1 first) or 'latency' (fastest known first). */
+  routingStrategy: 'priority' | 'latency';
+  /** Max time a request waits for a cooling account instead of failing fast. */
+  queueMaxWaitMs: number;
+  /** Optional webhook POSTed on dead keys / pool exhaustion (Telegram-compatible). */
+  alertWebhookUrl: string;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -57,7 +63,14 @@ function fromEnv(): Settings {
     tokenSaverMaxChars: num(process.env.TOKEN_SAVER_MAX_CHARS, 20000),
     autoScrape: bool(process.env.AUTO_SCRAPE, false),
     autoScrapeIntervalHours: num(process.env.AUTO_SCRAPE_INTERVAL_HOURS, 6),
+    routingStrategy: parseRoutingStrategy(process.env.ROUTING_STRATEGY),
+    queueMaxWaitMs: num(process.env.QUEUE_MAX_WAIT_MS, 30000),
+    alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? '',
   };
+}
+
+function parseRoutingStrategy(v: string | undefined): 'priority' | 'latency' {
+  return (v ?? '').toLowerCase() === 'latency' ? 'latency' : 'priority';
 }
 
 function parseEgressFamily(v: string | undefined): 'auto' | '4' | '6' {
@@ -92,6 +105,9 @@ let current: Settings = (() => {
         tokenSaverMaxChars: num(raw.tokenSaverMaxChars, base.tokenSaverMaxChars),
         autoScrape: typeof raw.autoScrape === 'boolean' ? raw.autoScrape : base.autoScrape,
         autoScrapeIntervalHours: num(raw.autoScrapeIntervalHours, base.autoScrapeIntervalHours),
+        routingStrategy: raw.routingStrategy === 'latency' ? 'latency' : base.routingStrategy,
+        queueMaxWaitMs: num(raw.queueMaxWaitMs, base.queueMaxWaitMs),
+        alertWebhookUrl: typeof raw.alertWebhookUrl === 'string' ? raw.alertWebhookUrl : base.alertWebhookUrl,
       };
     }
   } catch {
@@ -137,6 +153,10 @@ export function saveSettings(patch: Partial<Settings>): Settings {
       patch.autoScrapeIntervalHours !== undefined
         ? num(patch.autoScrapeIntervalHours, current.autoScrapeIntervalHours)
         : current.autoScrapeIntervalHours,
+    routingStrategy: patch.routingStrategy === 'latency' || patch.routingStrategy === 'priority' ? patch.routingStrategy : current.routingStrategy,
+    queueMaxWaitMs:
+      patch.queueMaxWaitMs !== undefined ? num(patch.queueMaxWaitMs, current.queueMaxWaitMs) : current.queueMaxWaitMs,
+    alertWebhookUrl: typeof patch.alertWebhookUrl === 'string' ? patch.alertWebhookUrl : current.alertWebhookUrl,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
