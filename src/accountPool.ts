@@ -13,6 +13,8 @@ export interface AccountStatus {
   usage5h: number;
   /** EMA of successful request latency in ms (0 when unknown). */
   avgLatencyMs: number;
+  /** Requests currently in flight on this account. */
+  inflight: number;
 }
 
 /**
@@ -29,6 +31,8 @@ export class AccountPool {
   private quota: QuotaTracker | null = null;
   /** Exponential moving average of successful request latency per account (ms). */
   private readonly latencyEma = new Map<string, number>();
+  /** In-flight request count per account (concurrency cap). */
+  private readonly inflight = new Map<string, number>();
 
   constructor(accounts: AccountConfig[], quota?: QuotaTracker) {
     this.accounts = [...accounts].sort((a, b) => a.priority - b.priority);
@@ -49,21 +53,31 @@ export class AccountPool {
     for (const id of [...this.invalid]) {
       if (!known.has(id)) this.invalid.delete(id);
     }
+    for (const id of [...this.inflight.keys()]) {
+      if (!known.has(id)) this.inflight.delete(id);
+    }
     this.accounts = [...accounts].sort((a, b) => a.priority - b.priority);
   }
 
   /** Highest-priority usable account. Over-quota accounts are excluded; among the
    *  rest, the least-used one wins ties so load spreads before any 429 hits.
    *  With routingStrategy 'latency', the fastest-known account wins instead
-   *  (unknown latency counts as 0 so new accounts get tried). */
+   *  (unknown latency counts as 0 so new accounts get tried).
+   *  Accounts at the concurrency cap are skipped. A successful acquire
+   *  increments the in-flight count — pair it with release(). */
   acquire(provider?: string): AccountConfig | null {
     const now = Date.now();
     for (const [id, until] of this.coolingUntil) {
       if (until <= now) this.coolingUntil.delete(id);
     }
+    const cap = getSettings().accountConcurrency;
     const pool = provider ? this.accounts.filter((a) => a.provider === provider) : this.accounts;
     const usable = pool.filter(
-      (a) => !this.invalid.has(a.id) && !this.coolingUntil.has(a.id) && !this.quota?.isOverQuota(a.id),
+      (a) =>
+        !this.invalid.has(a.id) &&
+        !this.coolingUntil.has(a.id) &&
+        !this.quota?.isOverQuota(a.id) &&
+        (cap <= 0 || (this.inflight.get(a.id) ?? 0) < cap),
     );
     const latency = (id: string): number => this.latencyEma.get(id) ?? 0;
     const usage = (id: string): number => this.quota?.usage(id) ?? 0;
@@ -72,7 +86,16 @@ export class AccountPool {
     } else {
       usable.sort((a, b) => a.priority - b.priority || usage(a.id) - usage(b.id) || latency(a.id) - latency(b.id));
     }
-    return usable[0] ?? null;
+    const picked = usable[0] ?? null;
+    if (picked && cap > 0) this.inflight.set(picked.id, (this.inflight.get(picked.id) ?? 0) + 1);
+    return picked;
+  }
+
+  /** Release an in-flight slot after the request finished (success or retry). */
+  release(id: string): void {
+    const n = this.inflight.get(id) ?? 0;
+    if (n <= 1) this.inflight.delete(id);
+    else this.inflight.set(id, n - 1);
   }
 
   /** Number of configured accounts, optionally filtered by provider. */
@@ -89,6 +112,35 @@ export class AccountPool {
   /** EMA latency in ms, or null when the account has no successful requests yet. */
   latencyOf(id: string): number | null {
     return this.latencyEma.get(id) ?? null;
+  }
+
+  /**
+   * True when accounts exist that are usable (not invalid/cooling/over-quota)
+   * but every one is at the concurrency cap.
+   */
+  atCap(provider?: string): boolean {
+    const cap = getSettings().accountConcurrency;
+    if (cap <= 0) return false;
+    const now = Date.now();
+    const pool = provider ? this.accounts.filter((a) => a.provider === provider) : this.accounts;
+    const candidates = pool.filter(
+      (a) => !this.invalid.has(a.id) && (this.coolingUntil.get(a.id) ?? 0) <= now && !this.quota?.isOverQuota(a.id),
+    );
+    return candidates.length > 0 && candidates.every((a) => (this.inflight.get(a.id) ?? 0) >= cap);
+  }
+
+  /** True when at least one usable account is under the concurrency cap. */
+  hasCapacity(provider?: string): boolean {
+    const cap = getSettings().accountConcurrency;
+    const now = Date.now();
+    const pool = provider ? this.accounts.filter((a) => a.provider === provider) : this.accounts;
+    return pool.some(
+      (a) =>
+        !this.invalid.has(a.id) &&
+        (this.coolingUntil.get(a.id) ?? 0) <= now &&
+        !this.quota?.isOverQuota(a.id) &&
+        (cap <= 0 || (this.inflight.get(a.id) ?? 0) < cap),
+    );
   }
 
   /**
@@ -156,6 +208,7 @@ export class AccountPool {
         cooldownEndsInMs: state === 'cooling_down' ? Math.max(0, until - now) : 0,
         usage5h: this.quota?.usage(a.id) ?? 0,
         avgLatencyMs: this.latencyEma.get(a.id) ?? 0,
+        inflight: this.inflight.get(a.id) ?? 0,
       };
     });
   }
