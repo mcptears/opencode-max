@@ -31,6 +31,8 @@ export interface Settings {
   queueMaxWaitMs: number;
   /** Optional webhook POSTed on dead keys / pool exhaustion (Telegram-compatible). */
   alertWebhookUrl: string;
+  /** Max parallel in-flight requests per account (0 = unlimited). */
+  accountConcurrency: number;
 }
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE ?? path.resolve('settings.json');
@@ -66,6 +68,7 @@ function fromEnv(): Settings {
     routingStrategy: parseRoutingStrategy(process.env.ROUTING_STRATEGY),
     queueMaxWaitMs: num(process.env.QUEUE_MAX_WAIT_MS, 30000),
     alertWebhookUrl: process.env.ALERT_WEBHOOK_URL ?? '',
+    accountConcurrency: num(process.env.ACCOUNT_CONCURRENCY, 4),
   };
 }
 
@@ -108,6 +111,7 @@ let current: Settings = (() => {
         routingStrategy: raw.routingStrategy === 'latency' ? 'latency' : base.routingStrategy,
         queueMaxWaitMs: num(raw.queueMaxWaitMs, base.queueMaxWaitMs),
         alertWebhookUrl: typeof raw.alertWebhookUrl === 'string' ? raw.alertWebhookUrl : base.alertWebhookUrl,
+        accountConcurrency: num(raw.accountConcurrency, base.accountConcurrency),
       };
     }
   } catch {
@@ -157,6 +161,8 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     queueMaxWaitMs:
       patch.queueMaxWaitMs !== undefined ? num(patch.queueMaxWaitMs, current.queueMaxWaitMs) : current.queueMaxWaitMs,
     alertWebhookUrl: typeof patch.alertWebhookUrl === 'string' ? patch.alertWebhookUrl : current.alertWebhookUrl,
+    accountConcurrency:
+      patch.accountConcurrency !== undefined ? num(patch.accountConcurrency, current.accountConcurrency) : current.accountConcurrency,
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   current = next;
