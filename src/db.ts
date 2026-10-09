@@ -39,5 +39,14 @@ export function getDb(): DatabaseSync {
     model TEXT
   );`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_request_ts ON request_log(ts);');
+  db.exec(`CREATE TABLE IF NOT EXISTS token_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    model TEXT,
+    prompt_tokens INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL
+  );`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_token_usage_ts ON token_usage(ts);');
   return db;
 }
