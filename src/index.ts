@@ -12,6 +12,7 @@ import { projectRoot } from './paths.js';
 import { buildRouter } from './routes.js';
 import { loadProviders } from './providers.js';
 import { ScraperJob } from './scraperJob.js';
+import { Alerter } from './alerts.js';
 import { SessionManager } from './sessionManager.js';
 import { QuotaTracker } from './quota.js';
 import { getSettings } from './settings.js';
@@ -75,6 +76,7 @@ async function main(): Promise<void> {
   const metrics = new Metrics();
   const quota = new QuotaTracker();
   const scraperJob = new ScraperJob(rotator, metrics);
+  const alerter = new Alerter(() => getSettings().alertWebhookUrl);
   pool.setQuotaTracker(quota);
   // Prune old usage events hourly so the table stays small.
   const quotaPruneTimer = setInterval(() => quota.prune(), 3600_000);
@@ -126,7 +128,7 @@ async function main(): Promise<void> {
   app.get('/', (_req, res) => res.redirect('/dashboard/'));
   app.use(buildAdminRouter({ pool, rotator, sessions, metrics, scraper: scraperJob }));
   // Providers are re-read from disk on every request so dashboard edits apply live.
-  app.use(buildRouter(pool, rotator, sessions, metrics, quota, loadProviders));
+  app.use(buildRouter(pool, rotator, sessions, metrics, quota, loadProviders, alerter));
 
   // Error handler.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
