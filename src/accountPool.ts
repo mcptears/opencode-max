@@ -11,6 +11,8 @@ export interface AccountStatus {
   cooldownEndsInMs: number;
   /** Requests in the trailing 5h window (quota tracking). */
   usage5h: number;
+  /** EMA of successful request latency in ms (0 when unknown). */
+  avgLatencyMs: number;
 }
 
 /**
@@ -25,6 +27,8 @@ export class AccountPool {
   /** Keys proven dead (401 / invalid-key 403). Skipped until manually reset. */
   private readonly invalid = new Set<string>();
   private quota: QuotaTracker | null = null;
+  /** Exponential moving average of successful request latency per account (ms). */
+  private readonly latencyEma = new Map<string, number>();
 
   constructor(accounts: AccountConfig[], quota?: QuotaTracker) {
     this.accounts = [...accounts].sort((a, b) => a.priority - b.priority);
@@ -49,7 +53,9 @@ export class AccountPool {
   }
 
   /** Highest-priority usable account. Over-quota accounts are excluded; among the
-   *  rest, the least-used one wins ties so load spreads before any 429 hits. */
+   *  rest, the least-used one wins ties so load spreads before any 429 hits.
+   *  With routingStrategy 'latency', the fastest-known account wins instead
+   *  (unknown latency counts as 0 so new accounts get tried). */
   acquire(provider?: string): AccountConfig | null {
     const now = Date.now();
     for (const [id, until] of this.coolingUntil) {
@@ -59,13 +65,49 @@ export class AccountPool {
     const usable = pool.filter(
       (a) => !this.invalid.has(a.id) && !this.coolingUntil.has(a.id) && !this.quota?.isOverQuota(a.id),
     );
-    usable.sort((a, b) => a.priority - b.priority || (this.quota?.usage(a.id) ?? 0) - (this.quota?.usage(b.id) ?? 0));
+    const latency = (id: string): number => this.latencyEma.get(id) ?? 0;
+    const usage = (id: string): number => this.quota?.usage(id) ?? 0;
+    if (getSettings().routingStrategy === 'latency') {
+      usable.sort((a, b) => latency(a.id) - latency(b.id) || a.priority - b.priority || usage(a.id) - usage(b.id));
+    } else {
+      usable.sort((a, b) => a.priority - b.priority || usage(a.id) - usage(b.id) || latency(a.id) - latency(b.id));
+    }
     return usable[0] ?? null;
   }
 
   /** Number of configured accounts, optionally filtered by provider. */
   count(provider?: string): number {
     return provider ? this.accounts.filter((a) => a.provider === provider).length : this.accounts.length;
+  }
+
+  /** Record a successful request latency (EMA, α=0.3). */
+  recordLatency(id: string, ms: number): void {
+    const prev = this.latencyEma.get(id);
+    this.latencyEma.set(id, prev === undefined ? ms : Math.round(prev * 0.7 + ms * 0.3));
+  }
+
+  /** EMA latency in ms, or null when the account has no successful requests yet. */
+  latencyOf(id: string): number | null {
+    return this.latencyEma.get(id) ?? null;
+  }
+
+  /**
+   * ms until the soonest cooling account of this provider becomes usable
+   * again; 0 when nothing is cooling (or everything is quota-parked, whose
+   * window slide we can't predict).
+   */
+  nextAvailableIn(provider?: string): number {
+    const now = Date.now();
+    let min = 0;
+    for (const [id, until] of this.coolingUntil) {
+      if (until <= now) continue;
+      const acc = this.accounts.find((a) => a.id === id);
+      if (!acc || this.invalid.has(id)) continue;
+      if (provider && acc.provider !== provider) continue;
+      const wait = until - now;
+      if (min === 0 || wait < min) min = wait;
+    }
+    return min;
   }
 
   /** Park an account after a 429/quota hit. */
@@ -113,6 +155,7 @@ export class AccountPool {
         state,
         cooldownEndsInMs: state === 'cooling_down' ? Math.max(0, until - now) : 0,
         usage5h: this.quota?.usage(a.id) ?? 0,
+        avgLatencyMs: this.latencyEma.get(a.id) ?? 0,
       };
     });
   }
