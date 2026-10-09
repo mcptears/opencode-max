@@ -23,7 +23,7 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 69 unit tests, `npm test` |
+| 🧪 | **Tested** | 86 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 | 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
@@ -33,6 +33,12 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ⏳ | **Request queue** | Waits for a cooling account instead of 503ing |
 | 🔔 | **Down alerts** | Webhook ping on dead keys / pool exhaustion (Telegram-ready) |
 | 📊 | **Per-model stats** | Dashboard breakdown: requests, errors, latency per model |
+| 🔍 | **Request inspector** | Newest-first table of recent requests with status & latency |
+| 🧵 | **Concurrency caps** | Max parallel requests per key — bursts queue instead of 429ing |
+| 🏅 | **Proxy scoring** | Per-proxy ok/fail/latency stats, auto-drop for dead proxies |
+| 🔀 | **Model fallbacks** | `qwen-max` → `qwen-plus` automatically when exhausted |
+| 📦 | **Backup/restore** | One-click export/import of the whole configuration |
+| 🚨 | **Spike alerts** | Webhook ping when the error rate jumps |
 
 ## ⚙️ How it works
 
@@ -170,6 +176,30 @@ Set **Alert webhook URL** (or `ALERT_WEBHOOK_URL`) to get a JSON POST on dead ke
 
 The Overview dashboard shows a **Models** table: requests, errors and average latency per model over the last 24h, with the top provider per model. Same data as JSON at `GET /api/metrics/models?hours=24`.
 
+### Request inspector
+
+Right below the models table, the **Recent requests** panel lists the latest proxied requests newest-first: time, model, provider, account, HTTP status and latency. Same data as JSON at `GET /api/requests?limit=50`.
+
+### Concurrency caps
+
+`ACCOUNT_CONCURRENCY` (default 4, `0` = unlimited) caps parallel in-flight requests per account key. When every usable account is at its cap, requests queue for a free slot (bounded by `QUEUE_MAX_WAIT_MS`) instead of hammering keys into 429s. In-flight counts show in the accounts table.
+
+### Proxy quality scoring
+
+Every proxy accumulates real-traffic stats — successful/failed counts and latency EMA — shown in the proxy pool list. Proxies with `PROXY_AUTO_DROP_FAILS` consecutive failures (default 5, `0` = off) are automatically removed from the pool and the event is logged; the last remaining proxy is never dropped. Dead proxies no longer waste retry attempts.
+
+### Model fallback chains
+
+`MODEL_FALLBACKS` (JSON, e.g. `{"qwen-max": ["qwen-plus"]}`) or the dashboard textarea: when a model is exhausted on every provider, the request is retried against the fallback models in order, with the request body rewritten to the fallback name. Cyclic configs are safe (each model tried once).
+
+### Backup / restore
+
+The Settings section has **Export backup** (downloads a JSON with accounts, providers, scraper providers and settings) and **Import backup** (validates then replaces, live). The export endpoint requires the admin token even for GET, since it contains API keys.
+
+### Error-spike alerts
+
+When `ALERT_WEBHOOK_URL` is set, a background check watches the error rate: if it reaches `ERROR_SPIKE_THRESHOLD` (default 0.5) over the last `ERROR_SPIKE_WINDOW_MIN` minutes (default 10) with at least `ERROR_SPIKE_MIN_REQUESTS` requests (default 10), you get a webhook ping. Same 15-minute dedupe as the other alerts.
+
 ## 🐳 Docker
 
 ```bash
@@ -260,6 +290,12 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | `ROUTING_STRATEGY` | `priority` | `priority` (P1 first) or `latency` (fastest first) |
 | `QUEUE_MAX_WAIT_MS` | `30000` | Max wait for a cooling account before 503 (`0` = fail fast) |
 | `ALERT_WEBHOOK_URL` | _(empty)_ | JSON webhook for dead-key / pool-exhaustion alerts |
+| `MODEL_FALLBACKS` | `{}` | JSON map, e.g. `{"qwen-max":["qwen-plus"]}` |
+| `ACCOUNT_CONCURRENCY` | `4` | Max parallel in-flight requests per account (`0` = unlimited) |
+| `PROXY_AUTO_DROP_FAILS` | `5` | Consecutive failures before a proxy is auto-dropped (`0` = off) |
+| `ERROR_SPIKE_THRESHOLD` | `0.5` | Error rate (0–1) that triggers a spike alert |
+| `ERROR_SPIKE_WINDOW_MIN` | `10` | Minutes over which the spike rate is measured |
+| `ERROR_SPIKE_MIN_REQUESTS` | `10` | Min requests in the window before a spike can trigger |
 
 `accounts.json` — array of `{ id, name, provider, apiKey, priority, cooldownPeriod?, baseUrl? }`.
 `proxies.json` — array (or `{ "proxies": [...] }`) of `http://user:pass@host:port` URLs.
