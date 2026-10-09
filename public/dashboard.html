@@ -195,6 +195,9 @@
             <label>Auto-drop proxy after N fails<input name="proxyAutoDropFails" type="number" min="0" placeholder="5"></label>
             <label>Model fallbacks (JSON)<textarea name="modelFallbacks" rows="3" placeholder='{"qwen-max": ["qwen-plus"]}' spellcheck="false"></textarea></label>
             <label>Alert webhook URL<input name="alertWebhookUrl" type="password" placeholder="https://… (Telegram Bot API works)" autocomplete="off"></label>
+            <label>Error spike threshold (0–1)<input name="errorSpikeThreshold" type="number" min="0" max="1" step="0.05" placeholder="0.5"></label>
+            <label>Spike window (minutes)<input name="errorSpikeWindowMin" type="number" min="1" placeholder="10"></label>
+            <label>Spike min requests<input name="errorSpikeMinRequests" type="number" min="1" placeholder="10"></label>
             <label>Request timeout (ms)<input name="requestTimeoutMs" type="number" min="1000"></label>
             <label>Port<input name="port" type="number" min="1" max="65535"></label>
             <label>Admin token<input name="adminToken" type="password" placeholder="empty = open on localhost"></label>
