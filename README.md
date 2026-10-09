@@ -23,10 +23,10 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 139 unit tests, `npm test` |
+| 🧪 | **Tested** | 150 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
-| 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
+| 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, Qwen, …) |
 | 🛟 | **Cross-provider failover** | Primary down? Requests spill over to the next eligible provider |
 | ⏰ | **Auto-scrape** | Re-scrapes free proxies on a schedule to keep the pool fresh |
 | ⚡ | **Latency routing** | Pick the fastest healthy account, not just P1 first |
@@ -110,7 +110,7 @@ The server also boots with an empty pool, so connecting from the dashboard is th
 
 Every account field is editable from the dashboard — no config files needed:
 
-- **Add manually** for any provider: display name, provider, API key (empty = keyless provider, e.g. self-hosted qwen2api without `API_TOKENS`), priority, per-account cooldown after 429s, upstream URL override, and a per-account 5h quota limit.
+- **Add manually** for any provider: display name, provider, API key (empty = keyless provider), priority, per-account cooldown after 429s, upstream URL override, and a per-account 5h quota limit.
 - **Edit** any account inline: rename, move providers, rotate the key (leave empty to keep it, or tick *Remove key* to go keyless), and tweak priority / cooldown / upstream / quota.
 - The accounts table shows live `used/limit` quota against each account's own limit.
 
@@ -151,13 +151,15 @@ POST   /api/providers/:id/test     # live /models check
 
 `GET /v1/models` aggregates the model catalogs of all enabled providers. Accounts belong to a provider via their `provider` field; the base URL resolves as `account.baseUrl` → `provider.baseUrl` → `UPSTREAM_BASE`.
 
-### Qwen via qwen2api
+### Qwen (built-in, no separate deployment)
 
-1. Deploy qwen2api yourself (Docker, Vercel, Netlify or Cloudflare Workers — see its README), listening on port `8765`.
-2. In the dashboard, hit **Add Qwen (qwen2api) provider** — or `POST /api/providers/preset/qwen`.
-3. No account needed: if your qwen2api has no `API_TOKENS` set, requests forward without a key. If it does, add an account on the `qwen` provider with the token.
+Qwen runs **natively inside opencode-max** — it speaks Qwen's web API directly, so there's nothing else to deploy:
 
-Then just ask for a Qwen model — `qwen-max`, `qwen-plus`, … — and it routes there, with the same proxy rotation, retries and session handling as Zen.
+1. In the dashboard, hit **Add Qwen provider** (or `POST /api/providers/preset/qwen`). Already have the old self-hosted entry? The same button upgrades it in place — your accounts keep working.
+2. Hit **Connect Qwen account**: sign in at `chat.qwen.ai`, run `localStorage.getItem("token")` in DevTools, paste the token. It's validated live before anything is saved. A full `Cookie` header works too.
+3. Ask for a Qwen model — `qwen-max`, `qwen-plus`, `qwen-coder`, … — and it routes there, with the same proxy rotation, retries, quota tracking and session handling as Zen.
+
+Each request runs in a disposable upstream chat (created, used, deleted), so your Qwen account doesn't fill up with chats. Thinking phases stream back as `reasoning_content`. The provider's Qwen web model id and the friendly-name → model-id map are editable in the provider settings. Qwen risk-control responses park the account in cooldown automatically instead of burning it.
 
 ### Cross-provider failover
 
@@ -363,7 +365,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 139 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 150 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
