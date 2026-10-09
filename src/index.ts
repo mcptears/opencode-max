@@ -6,6 +6,7 @@ import { AccountPool } from './accountPool.js';
 import { buildAdminRouter } from './adminRoutes.js';
 import { describeAutoStart, isAutoStartEnabled } from './autostart.js';
 import { CONFIG, loadAccounts, loadProxies } from './config.js';
+import { writeProxies } from './store.js';
 import { IpRotator } from './ipRotator.js';
 import { Metrics } from './metrics.js';
 import { projectRoot } from './paths.js';
@@ -84,6 +85,15 @@ async function main(): Promise<void> {
 
   rotator.onHealthChange = (proxy, healthy) => {
     metrics.record(healthy ? 'rotated' : 'error', `proxy ${healthy ? 'recovered' : 'unhealthy, skipped in rotation'}: ${proxy}`);
+  };
+  // Persist auto-dropped proxies so they stay out of the pool.
+  rotator.onProxyDropped = (proxy, consecFails) => {
+    try {
+      writeProxies(rotator.rawProxies());
+    } catch {
+      /* ignore */
+    }
+    metrics.record('proxy_removed', `proxy auto-dropped after ${consecFails} consecutive failures: ${proxy}`);
   };
   if (settings.proxyHealthCheck) {
     rotator.startHealthChecks(settings.proxyHealthIntervalMs);
