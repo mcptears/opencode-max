@@ -53,6 +53,7 @@ function httpError(status: number, message: string): Error & { status: number } 
 
 import type { QuotaTracker } from './quota.js';
 import { compressToolResults } from './tokenSaver.js';
+import { trackUsage } from './usage.js';
 import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
 import type { Alerter } from './alerts.js';
@@ -319,7 +320,13 @@ export class UpstreamClient {
         if (proxy) this.rotator.recordProxyResult(proxy, true, Date.now() - attemptStart);
         this.metrics?.logRequest(account.id, upstream.status, Date.now() - startedAt, model);
         this.pool.release(account.id);
-        return this.toResult(upstream);
+        const result = this.toResult(upstream);
+        // Sniff token usage out of the response (JSON body or final SSE chunk)
+        // without touching the bytes the client receives.
+        if (result.body) {
+          result.body = trackUsage(result.body, (u) => this.metrics?.logUsage(account.id, model, u.prompt, u.completion));
+        }
+        return result;
       }
 
       // 429 / quota / transient 5xx: park the token, rotate egress IP,
