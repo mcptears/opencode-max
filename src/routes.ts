@@ -7,7 +7,8 @@ import type { IpRotator } from './ipRotator.js';
 import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
 import type { QuotaTracker } from './quota.js';
-import { ZenClient } from './zenClient.js';
+import { UpstreamClient } from './upstreamClient.js';
+import { matchProvider, defaultProvider, type ProviderConfig } from './providers.js';
 
 function abortOnClientClose(req: express.Request): AbortSignal {
   const controller = new AbortController();
@@ -15,12 +16,39 @@ function abortOnClientClose(req: express.Request): AbortSignal {
   return controller.signal;
 }
 
-export function buildRouter(pool: AccountPool, rotator: IpRotator, sessions: SessionManager, metrics?: Metrics, quota?: QuotaTracker): Router {
+function httpError(status: number, message: string): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}
+
+/** Pull the model id out of a JSON request body (chat completions, messages). */
+export function extractModel(bodyText: string | undefined): string | undefined {
+  if (!bodyText) return undefined;
+  try {
+    const parsed = JSON.parse(bodyText) as { model?: unknown };
+    return typeof parsed.model === 'string' ? parsed.model : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function buildRouter(
+  pool: AccountPool,
+  rotator: IpRotator,
+  sessions: SessionManager,
+  metrics?: Metrics,
+  quota?: QuotaTracker,
+  getProviders: () => ProviderConfig[] = () => [],
+): Router {
   const router = Router();
-  const zen = new ZenClient(pool, rotator, sessions, metrics, quota);
+  const upstream = new UpstreamClient(pool, rotator, sessions, metrics, quota, getProviders);
 
   router.get('/health', (_req, res) => {
-    res.json({ ok: true, upstream: 'opencode-zen', ip: rotator.status(), accounts: pool.status().length });
+    res.json({
+      ok: true,
+      providers: getProviders().map((p) => ({ id: p.id, name: p.name, enabled: p.enabled })),
+      ip: rotator.status(),
+      accounts: pool.status().length,
+    });
   });
 
   /** Pool status (keys are never exposed). */
@@ -43,13 +71,19 @@ export function buildRouter(pool: AccountPool, rotator: IpRotator, sessions: Ses
           ? (req.body as Buffer).toString('utf8')
           : undefined;
 
-      const result = await zen.forward({
+      const providers = getProviders();
+      const provider = matchProvider(providers, extractModel(bodyText)) ?? defaultProvider(providers);
+      if (!provider) throw httpError(503, 'no providers enabled — add one in the dashboard');
+
+      const result = await upstream.forward({
         method: req.method,
         path: zenPath,
         query: qIndex >= 0 ? req.originalUrl.slice(qIndex) : '',
         headers: req.headers as Record<string, string | string[] | undefined>,
         bodyText,
-        provider: 'opencode-zen',
+        provider: provider.id,
+        // Providers like a self-hosted qwen2api need no API key at all.
+        allowAnonymous: true,
         signal: abortOnClientClose(req),
       });
 
@@ -65,10 +99,47 @@ export function buildRouter(pool: AccountPool, rotator: IpRotator, sessions: Ses
     }
   };
 
-  router.get('/v1/models', proxy);
+  /** Aggregate model lists from every enabled provider. */
+  router.get('/v1/models', async (_req, res, next) => {
+    try {
+      const seen = new Set<string>();
+      const data: unknown[] = [];
+      for (const p of getProviders().filter((x) => x.enabled)) {
+        try {
+          const account = pool.acquire(p.id);
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 15000);
+          try {
+            const r = await fetch(`${p.baseUrl}/models`, {
+              headers: account?.apiKey ? { authorization: `Bearer ${account.apiKey}` } : {},
+              dispatcher: rotator.dispatcherFor(rotator.current(), rotator.currentFamily()),
+              signal: controller.signal,
+            } as RequestInit & { dispatcher?: unknown });
+            if (!r.ok) continue;
+            const j = (await r.json()) as { data?: { id?: unknown }[] };
+            for (const m of j.data ?? []) {
+              const id = typeof m?.id === 'string' ? m.id : null;
+              if (id && !seen.has(id)) {
+                seen.add(id);
+                data.push(m);
+              }
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+        } catch {
+          /* provider unreachable — skip it, don't fail the whole list */
+        }
+      }
+      res.json({ object: 'list', data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post('/v1/chat/completions', proxy);
   router.post('/v1/messages', proxy);
-  // Catch-all for any other Zen paths.
+  // Catch-all for any other upstream paths.
   router.all(/^\/v1\/.*/, proxy);
 
   return router;
