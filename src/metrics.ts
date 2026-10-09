@@ -158,6 +158,20 @@ export class Metrics {
     return this.events.slice(0, limit);
   }
 
+  /** Error rate over a trailing window (for spike alerts). */
+  errorRate(windowMs: number): { requests: number; errors: number; rate: number } {
+    try {
+      const row = getDb()
+        .prepare('SELECT COUNT(*) AS requests, SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END) AS errors FROM request_log WHERE ts > ?')
+        .get(Date.now() - windowMs) as unknown as { requests: number; errors: number };
+      const requests = row?.requests ?? 0;
+      const errors = row?.errors ?? 0;
+      return { requests, errors, rate: requests > 0 ? errors / requests : 0 };
+    } catch {
+      return { requests: 0, errors: 0, rate: 0 };
+    }
+  }
+
   /** Latest proxied requests, newest first (for the dashboard inspector). */
   recentRequests(
     limit = 50,
