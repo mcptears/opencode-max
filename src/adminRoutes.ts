@@ -100,6 +100,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ hours, buckets: metrics.history(hours) });
   });
 
+  /** Per-model usage: requests, errors, avg latency over the last N hours. */
+  router.get('/api/metrics/models', (req, res) => {
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    const providerOf = new Map(pool.status().map((a) => [a.id, a.provider] as const));
+    res.json({ hours, models: metrics.modelStats(hours, (id) => providerOf.get(id) ?? '') });
+  });
+
   // ---- accounts ----
   router.get('/api/accounts', (_req, res) => {
     // Never leak keys: return status view only.
@@ -469,8 +476,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   router.get('/api/settings', (_req, res) => {
     const s = getSettings();
     res.json({
-      settings: { ...s, adminToken: s.adminToken ? '••••••••' : '' },
+      settings: { ...s, adminToken: s.adminToken ? '••••••••' : '', alertWebhookUrl: s.alertWebhookUrl ? '••••••••' : '' },
       adminTokenSet: s.adminToken.length > 0,
+      alertWebhookSet: s.alertWebhookUrl.length > 0,
       settingsFile: settingsFilePath(),
     });
   });
