@@ -11,6 +11,12 @@ export interface AccountStatus {
   cooldownEndsInMs: number;
   /** Requests in the trailing 5h window (quota tracking). */
   usage5h: number;
+  /** Per-account quota override (undefined = global limit). */
+  quotaLimit?: number;
+  /** Per-account cooldown after 429 (undefined = global default). */
+  cooldownPeriod?: number;
+  /** Per-account upstream override (undefined = provider/global default). */
+  baseUrl?: string;
   /** EMA of successful request latency in ms (0 when unknown). */
   avgLatencyMs: number;
   /** Requests currently in flight on this account. */
@@ -76,7 +82,7 @@ export class AccountPool {
       (a) =>
         !this.invalid.has(a.id) &&
         !this.coolingUntil.has(a.id) &&
-        !this.quota?.isOverQuota(a.id) &&
+        !this.quota?.isOverQuota(a.id, a.quotaLimit) &&
         (cap <= 0 || (this.inflight.get(a.id) ?? 0) < cap),
     );
     const latency = (id: string): number => this.latencyEma.get(id) ?? 0;
@@ -124,7 +130,7 @@ export class AccountPool {
     const now = Date.now();
     const pool = provider ? this.accounts.filter((a) => a.provider === provider) : this.accounts;
     const candidates = pool.filter(
-      (a) => !this.invalid.has(a.id) && (this.coolingUntil.get(a.id) ?? 0) <= now && !this.quota?.isOverQuota(a.id),
+      (a) => !this.invalid.has(a.id) && (this.coolingUntil.get(a.id) ?? 0) <= now && !this.quota?.isOverQuota(a.id, a.quotaLimit),
     );
     return candidates.length > 0 && candidates.every((a) => (this.inflight.get(a.id) ?? 0) >= cap);
   }
@@ -138,7 +144,7 @@ export class AccountPool {
       (a) =>
         !this.invalid.has(a.id) &&
         (this.coolingUntil.get(a.id) ?? 0) <= now &&
-        !this.quota?.isOverQuota(a.id) &&
+        !this.quota?.isOverQuota(a.id, a.quotaLimit) &&
         (cap <= 0 || (this.inflight.get(a.id) ?? 0) < cap),
     );
   }
@@ -207,6 +213,9 @@ export class AccountPool {
         state,
         cooldownEndsInMs: state === 'cooling_down' ? Math.max(0, until - now) : 0,
         usage5h: this.quota?.usage(a.id) ?? 0,
+        quotaLimit: a.quotaLimit,
+        cooldownPeriod: a.cooldownPeriod,
+        baseUrl: a.baseUrl,
         avgLatencyMs: this.latencyEma.get(a.id) ?? 0,
         inflight: this.inflight.get(a.id) ?? 0,
       };
