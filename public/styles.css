@@ -96,6 +96,9 @@ textarea{font-family:ui-monospace,monospace;font-size:13px;resize:vertical}
 .plist .tag.ok{background:rgba(52,217,123,.14);color:var(--ok)}
 .plist .tag.bad{background:rgba(255,93,108,.14);color:var(--bad)}
 .tag.warn{background:rgba(255,176,46,.16);color:var(--warn);border-radius:6px;padding:2px 8px;font-size:11px}
+.tag{display:inline-block;border-radius:6px;padding:2px 8px;font-size:11px;background:rgba(0,212,255,.14);color:var(--acc2)}
+.tag.ok{background:rgba(52,217,123,.14);color:var(--ok)}
+.tag.bad{background:rgba(255,93,108,.14);color:var(--bad)}
 label.check{display:flex;flex-direction:row;align-items:center;gap:10px;cursor:pointer}
 label.check input{width:auto;accent-color:var(--acc)}
 .events{list-style:none;display:grid;gap:8px;max-height:320px;overflow:auto;padding-right:4px}
