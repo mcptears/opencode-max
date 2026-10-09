@@ -128,6 +128,31 @@ async function main(): Promise<void> {
   };
   scheduleScrape(60_000);
 
+  // Error-spike alerts: webhook ping when the recent error rate jumps.
+  // Self-rescheduling so dashboard changes apply live. The alerter dedupes
+  // per event (15 min) so a sustained outage can't spam.
+  const scheduleSpikeCheck = (): void => {
+    const windowMin = Math.max(1, getSettings().errorSpikeWindowMin);
+    const t = setTimeout(() => {
+      try {
+        const s = getSettings();
+        const windowMs = Math.max(1, s.errorSpikeWindowMin) * 60_000;
+        const { requests, errors, rate } = metrics.errorRate(windowMs);
+        if (requests >= s.errorSpikeMinRequests && rate >= s.errorSpikeThreshold && s.errorSpikeThreshold > 0) {
+          void alerter.send(
+            'error_spike',
+            `error spike: ${errors}/${requests} requests failed (${Math.round(rate * 100)}%) in the last ${s.errorSpikeWindowMin}m`,
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+      scheduleSpikeCheck();
+    }, windowMin * 60_000);
+    if (typeof t.unref === 'function') t.unref();
+  };
+  scheduleSpikeCheck();
+
   const app = express();
   app.disable('x-powered-by');
   app.use(express.raw({ type: () => true, limit: '25mb' }));
