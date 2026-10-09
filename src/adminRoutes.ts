@@ -518,6 +518,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       const clean = parseModelFallbacks(JSON.stringify(body.modelFallbacks));
       patch.modelFallbacks = clean;
     }
+    if (body.errorSpikeThreshold !== undefined) patch.errorSpikeThreshold = body.errorSpikeThreshold;
+    if (body.errorSpikeWindowMin !== undefined) patch.errorSpikeWindowMin = body.errorSpikeWindowMin;
+    if (body.errorSpikeMinRequests !== undefined) patch.errorSpikeMinRequests = body.errorSpikeMinRequests;
     // Port changes are saved but only take effect after a restart.
     const portChanged = body.port !== undefined && Number(body.port) !== getSettings().port;
     if (body.port !== undefined) patch.port = body.port;
