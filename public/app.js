@@ -38,6 +38,7 @@ async function refresh() {
     if (!res.ok) throw new Error(res.status);
     renderStatus(await res.json());
     drawTraffic();
+    loadModels();
   } catch {
     $('#statusPill').textContent = 'offline';
     $('#statusPill').className = 'pill';
@@ -50,8 +51,9 @@ function accountRows(s, withActions) {
     const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}" style="margin-left:6px">Reset</button>` : '';
     const usage = a.usage5h || 0;
     const usageCell = `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span></td>`;
+    const latencyCell = `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>`;
     const cells = withActions
-      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>${usageCell}`
+      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>${usageCell}${latencyCell}`
       : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>${usageCell}`;
     return `<tr>${cells}
       <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
@@ -107,6 +109,17 @@ async function drawTraffic() {
   ctx.fillText(lt, w - ctx.measureText(lt).width - 4, h - 2);
 }
 
+async function loadModels() {
+  try {
+    const { models } = await (await api('/api/metrics/models?hours=24')).json();
+    $('#modelsTbl tbody').innerHTML = (models || []).map((m) => {
+      const errPct = m.requests ? Math.round((m.errors / m.requests) * 100) : 0;
+      return `<tr><td><code>${esc(m.model)}</code></td><td>${esc(m.provider)}</td><td>${m.requests}</td>` +
+        `<td>${m.errors} <span class="hint">(${errPct}%)</span></td><td>${m.avgLatencyMs}<small> ms</small></td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="hint">no requests yet</td></tr>';
+  } catch { /* ignore */ }
+}
+
 function renderStatus(s) {
   const active = s.accounts.filter((a) => a.state === 'active').length;
   $('#statusPill').textContent = `● live · ${active}/${s.accounts.length} accounts`;
@@ -124,7 +137,7 @@ function renderStatus(s) {
 
   $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="5" class="hint">no accounts configured</td></tr>';
   const tb = $('#accountsTbl tbody');
-  tb.innerHTML = accountRows(s, true) || '<tr><td colspan="8" class="hint">no accounts configured</td></tr>';
+  tb.innerHTML = accountRows(s, true) || '<tr><td colspan="9" class="hint">no accounts configured</td></tr>';
   tb.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
@@ -187,13 +200,14 @@ async function loadSettings() {
   try {
     const { settings } = await (await api('/api/settings')).json();
     const f = $('#settingsForm');
-    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours']) {
+    for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs']) {
       if (f[k] && settings[k] !== undefined && settings[k] !== '') f[k].value = settings[k];
     }
     if (f.proxyHealthCheck) f.proxyHealthCheck.checked = settings.proxyHealthCheck !== false;
     if (f.egressFamily && settings.egressFamily) f.egressFamily.value = settings.egressFamily;
     if (f.tokenSaver) f.tokenSaver.checked = settings.tokenSaver !== false;
     if (f.autoScrape) f.autoScrape.checked = settings.autoScrape === true;
+    if (f.routingStrategy && settings.routingStrategy) f.routingStrategy.value = settings.routingStrategy;
   } catch { /* ignore */ }
 }
 
@@ -380,18 +394,21 @@ $('#scrapeBtn').onclick = async () => {
 $('#settingsForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, body = {};
-  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours']) {
+  for (const k of ['upstreamBase', 'maxRetries', 'retryBaseMs', 'retryMaxMs', 'defaultCooldownMs', 'requestTimeoutMs', 'port', 'proxyHealthIntervalMs', 'quota5hLimit', 'tokenSaverMaxChars', 'autoScrapeIntervalHours', 'queueMaxWaitMs']) {
     if (f[k].value !== '') body[k] = f[k].type === 'number' ? Number(f[k].value) : f[k].value;
   }
   body.proxyHealthCheck = !!f.proxyHealthCheck.checked;
   body.tokenSaver = !!f.tokenSaver.checked;
   body.autoScrape = !!f.autoScrape.checked;
+  if (f.routingStrategy && f.routingStrategy.value) body.routingStrategy = f.routingStrategy.value;
+  if (f.alertWebhookUrl.value) body.alertWebhookUrl = f.alertWebhookUrl.value;
   if (f.egressFamily && f.egressFamily.value) body.egressFamily = f.egressFamily.value;
   if (f.adminToken.value) { body.adminToken = f.adminToken.value; adminToken = f.adminToken.value; localStorage.setItem('om_admin_token', adminToken); }
   const r = await jpost('/api/settings', body);
   const d = await r.json().catch(() => ({}));
   $('#settingsMsg').textContent = r.ok ? '✓ Saved' + (d.restartRequired ? ' — restart required for the port change.' : '') : 'Save failed.';
   f.adminToken.value = '';
+  f.alertWebhookUrl.value = '';
   refresh();
 };
 
