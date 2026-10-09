@@ -5,7 +5,7 @@ import type { AccountConfig } from './config.js';
 import type { IpRotator } from './ipRotator.js';
 import type { Metrics } from './metrics.js';
 import type { SessionManager } from './sessionManager.js';
-import { getSettings, saveSettings, settingsFilePath } from './settings.js';
+import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks } from './settings.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
 import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
@@ -514,6 +514,10 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (typeof body.alertWebhookUrl === 'string' && body.alertWebhookUrl) patch.alertWebhookUrl = body.alertWebhookUrl;
     if (body.accountConcurrency !== undefined) patch.accountConcurrency = body.accountConcurrency;
     if (body.proxyAutoDropFails !== undefined) patch.proxyAutoDropFails = body.proxyAutoDropFails;
+    if (body.modelFallbacks !== undefined) {
+      const clean = parseModelFallbacks(JSON.stringify(body.modelFallbacks));
+      patch.modelFallbacks = clean;
+    }
     // Port changes are saved but only take effect after a restart.
     const portChanged = body.port !== undefined && Number(body.port) !== getSettings().port;
     if (body.port !== undefined) patch.port = body.port;
