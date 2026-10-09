@@ -43,12 +43,16 @@
           <div class="panel-head"><h3>Account pool</h3><span class="hint">live status</span></div>
           <table class="tbl" id="accountsTblMini"><thead><tr><th>Account</th><th>Priority</th><th>5h</th><th>State</th><th>Cooldown</th></tr></thead><tbody></tbody></table>
         </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Models · last 24h</h3><span class="hint">requests · errors · avg latency per model</span></div>
+          <table class="tbl" id="modelsTbl"><thead><tr><th>Model</th><th>Provider</th><th>Requests</th><th>Errors</th><th>Avg latency</th></tr></thead><tbody></tbody></table>
+        </div>
       </section>
 
       <section id="sec-accounts" class="sec">
         <div class="panel">
           <div class="panel-head"><h3>Accounts</h3><span class="hint">API keys are stored locally and never displayed</span></div>
-          <table class="tbl" id="accountsTbl"><thead><tr><th>ID</th><th>Name</th><th>Provider</th><th>Priority</th><th>5h usage</th><th>State</th><th>Cooldown</th><th></th></tr></thead><tbody></tbody></table>
+          <table class="tbl" id="accountsTbl"><thead><tr><th>ID</th><th>Name</th><th>Provider</th><th>Priority</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead><tbody></tbody></table>
           <h4 class="sub">Add account</h4>
           <div class="connect-row">
             <button class="btn primary" id="connectBtn">Connect OpenCode account</button>
@@ -181,6 +185,9 @@
             <label>Max chars / tool result<input name="tokenSaverMaxChars" type="number" min="1000" placeholder="20000"></label>
             <label class="check"><input name="autoScrape" type="checkbox"> Auto-scrape proxies on a schedule</label>
             <label>Auto-scrape every (hours)<input name="autoScrapeIntervalHours" type="number" min="1" placeholder="6"></label>
+            <label>Routing strategy<select name="routingStrategy"><option value="priority">priority — P1 first</option><option value="latency">latency — fastest first</option></select></label>
+            <label>Queue wait cap (ms)<input name="queueMaxWaitMs" type="number" min="0" placeholder="30000"></label>
+            <label>Alert webhook URL<input name="alertWebhookUrl" type="password" placeholder="https://… (Telegram Bot API works)" autocomplete="off"></label>
             <label>Request timeout (ms)<input name="requestTimeoutMs" type="number" min="1000"></label>
             <label>Port<input name="port" type="number" min="1" max="65535"></label>
             <label>Admin token<input name="adminToken" type="password" placeholder="empty = open on localhost"></label>
