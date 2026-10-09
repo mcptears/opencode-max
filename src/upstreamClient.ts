@@ -244,6 +244,7 @@ export class UpstreamClient {
         }
       } catch (e) {
         lastError = e; // network-level failure: back off and retry
+        if (proxy) this.rotator.recordProxyResult(proxy, false, 0);
         this.pool.release(account.id);
         await sleep(backoff(attempt));
         continue;
@@ -281,6 +282,7 @@ export class UpstreamClient {
         }
         this.metrics?.ok();
         if (account.apiKey) this.pool.recordLatency(account.id, Date.now() - attemptStart);
+        if (proxy) this.rotator.recordProxyResult(proxy, true, Date.now() - attemptStart);
         this.metrics?.logRequest(account.id, upstream.status, Date.now() - startedAt, model);
         this.pool.release(account.id);
         return this.toResult(upstream);
