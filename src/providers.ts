@@ -16,7 +16,7 @@ export interface ProviderConfig {
 
 export const PROVIDERS_FILE = path.join(projectRoot(), 'providers.json');
 
-/** One-click preset for a self-hosted qwen2api (https://github.com/smanx/qwen2api). */
+/** One-click preset for a self-hosted qwen2api. */
 export const QWEN_PRESET: ProviderConfig = {
   id: 'qwen',
   name: 'Qwen (qwen2api)',
