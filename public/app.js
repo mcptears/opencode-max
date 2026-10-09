@@ -230,6 +230,34 @@ async function loadSettings() {
 
 $('#btnRotate').onclick = async () => { await api('/v1/rotate', { method: 'POST' }); refresh(); };
 
+// ---- backup / restore ----
+$('#btnBackupExport').onclick = async () => {
+  const r = await api('/api/backup');
+  if (!r.ok) { $('#backupMsg').textContent = 'Export failed (admin token required?).'; return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `opencode-max-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  $('#backupMsg').textContent = '✓ Backup downloaded — store it somewhere safe, it contains API keys.';
+};
+$('#backupFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!confirm(`Restore configuration from ${file.name}? This replaces accounts, providers, scraper providers and settings.`)) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const r = await api('/api/backup/restore', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await r.json().catch(() => ({}));
+    $('#backupMsg').textContent = r.ok ? '✓ Backup restored.' : `Restore failed: ${d.error?.message || r.status}`;
+    if (r.ok) { loadSettings(); refresh(); }
+  } catch {
+    $('#backupMsg').textContent = 'Restore failed: not a valid backup file.';
+  }
+};
+
 // ---- Connect-account modal: link -> sign in anywhere -> paste key -> validated & added ----
 const connectModal = $('#connectModal');
 function openConnect() {
