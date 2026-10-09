@@ -513,6 +513,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     if (body.queueMaxWaitMs !== undefined) patch.queueMaxWaitMs = body.queueMaxWaitMs;
     if (typeof body.alertWebhookUrl === 'string' && body.alertWebhookUrl) patch.alertWebhookUrl = body.alertWebhookUrl;
     if (body.accountConcurrency !== undefined) patch.accountConcurrency = body.accountConcurrency;
+    if (body.proxyAutoDropFails !== undefined) patch.proxyAutoDropFails = body.proxyAutoDropFails;
     // Port changes are saved but only take effect after a restart.
     const portChanged = body.port !== undefined && Number(body.port) !== getSettings().port;
     if (body.port !== undefined) patch.port = body.port;
