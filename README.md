@@ -23,10 +23,12 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
 | 🖥️ | **Dashboard** | Beautiful admin panel — accounts, proxies, settings, events |
 | 🔗 | **Connect flow** | Link → sign in anywhere → paste key → validated & added, no JSON |
-| 🧪 | **Tested** | 53 unit tests, `npm test` |
+| 🧪 | **Tested** | 59 unit tests, `npm test` |
 | 🐳 | **Docker** | Multi-stage build + compose, one command deploy |
 | 🕷️ | **Proxy scraper** | Scrapes free proxy lists, tests candidates, adds working ones |
 | 🔌 | **Multi-provider** | Route by model to any OpenAI-compatible upstream (Zen, qwen2api, …) |
+| 🛟 | **Cross-provider failover** | Primary down? Requests spill over to the next eligible provider |
+| ⏰ | **Auto-scrape** | Re-scrapes free proxies on a schedule to keep the pool fresh |
 
 ## ⚙️ How it works
 
@@ -139,6 +141,14 @@ POST   /api/providers/:id/test     # live /models check
 
 Then just ask for a Qwen model — `qwen-max`, `qwen-plus`, … — and it routes there, with the same proxy rotation, retries and session handling as Zen.
 
+### Cross-provider failover
+
+When a provider's accounts are all exhausted (or its upstream is down), the request automatically spills over to the next eligible provider instead of returning 503 — a provider is eligible if its model patterns match the request or it's a catch-all. Failovers are counted on the Overview dashboard and logged in the event feed.
+
+### Scheduled proxy scraping
+
+The scraper can run itself: enable **Auto-scrape** in Settings (or `AUTO_SCRAPE=1`) and set the interval (`AUTO_SCRAPE_INTERVAL_HOURS`, default 6). The first run fires 60s after boot, then on schedule; toggle and interval changes apply live without restart. The scraper tab shows when the last run happened and whether it was scheduled.
+
 ## 🐳 Docker
 
 ```bash
@@ -224,6 +234,8 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | `QUOTA_5H_LIMIT` | `200` | Per-account rolling 5h request budget |
 | `TOKEN_SAVER` | `1` | Compress oversized tool results |
 | `TOKEN_SAVER_MAX_CHARS` | `20000` | Max chars per tool result |
+| `AUTO_SCRAPE` | `0` | Re-scrape free proxies on a schedule |
+| `AUTO_SCRAPE_INTERVAL_HOURS` | `6` | Hours between scheduled scrapes |
 
 `accounts.json` — array of `{ id, name, provider, apiKey, priority, cooldownPeriod?, baseUrl? }`.
 `proxies.json` — array (or `{ "proxies": [...] }`) of `http://user:pass@host:port` URLs.
