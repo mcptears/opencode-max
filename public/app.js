@@ -610,12 +610,54 @@ $('#qwenPresetBtn').onclick = async () => {
 };
 
 // ---- Connect Qwen account ----
+document.querySelectorAll('[data-qtab]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('[data-qtab]').forEach((b) => b.classList.toggle('on', b === btn));
+    $('#qtab-signin').hidden = btn.dataset.qtab !== 'signin';
+    $('#qtab-token').hidden = btn.dataset.qtab !== 'token';
+    $('#qwenConnectMsg').textContent = '';
+  };
+});
 $('#qwenConnectBtn').onclick = () => {
   $('#qwenConnectMsg').textContent = '';
   $('#qwenConnectForm').reset();
+  const sf = $('#qwenSigninForm');
+  if (sf) sf.reset();
   $('#qwenConnectModal').hidden = false;
 };
 $('#qwenConnectClose').onclick = () => { $('#qwenConnectModal').hidden = true; };
+
+async function sha256Hex(text) {
+  if (crypto.subtle) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return null; // non-secure context — server will hash instead
+}
+
+$('#qwenSigninForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#qwenConnectMsg');
+  const email = f.email.value.trim();
+  const password = f.password.value;
+  if (!email || !password) { msg.textContent = '✕ email and password are required'; return; }
+  msg.textContent = 'Signing in…';
+  try {
+    const hash = await sha256Hex(password);
+    const payload = hash
+      ? { email, passwordHash: hash, name: f.name.value.trim() }
+      : { email, password, name: f.name.value.trim() }; // server hashes
+    const r = await api('/api/accounts/qwen-login', { method: 'POST', body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) { msg.textContent = '✕ ' + (j.error || 'sign-in failed'); return; }
+    msg.textContent = '✓ Qwen account connected.';
+    $('#qwenConnectModal').hidden = true;
+    loadUpProviders();
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
+};
 
 $('#qwenConnectForm').onsubmit = async (e) => {
   e.preventDefault();
