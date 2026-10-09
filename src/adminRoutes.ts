@@ -70,6 +70,12 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   const router = Router();
   const { pool, rotator, metrics } = ctx;
 
+  /** account id -> provider name, rebuilt per call so dashboard edits apply live. */
+  const providerOf = (): ((id: string) => string) => {
+    const map = new Map(pool.status().map((a) => [a.id, a.provider] as const));
+    return (id: string) => map.get(id) ?? '';
+  };
+
   const requireAuth: express.RequestHandler = (req, res, next) => {
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) adminAuth(req, res, next);
     else next();
@@ -103,8 +109,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   /** Per-model usage: requests, errors, avg latency over the last N hours. */
   router.get('/api/metrics/models', (req, res) => {
     const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
-    const providerOf = new Map(pool.status().map((a) => [a.id, a.provider] as const));
-    res.json({ hours, models: metrics.modelStats(hours, (id) => providerOf.get(id) ?? '') });
+    res.json({ hours, models: metrics.modelStats(hours, providerOf()) });
+  });
+
+  /** Recent proxied requests, newest first (dashboard inspector). */
+  router.get('/api/requests', (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    res.json({ requests: metrics.recentRequests(limit, providerOf()) });
   });
 
   // ---- accounts ----
