@@ -2,7 +2,7 @@ import { getDb } from './db.js';
 
 export interface MetricEvent {
   t: number;
-  kind: 'request' | 'rate_limited' | 'rotated' | 'account_added' | 'account_removed' | 'proxy_added' | 'proxy_removed' | 'settings' | 'error';
+  kind: 'request' | 'rate_limited' | 'rotated' | 'account_added' | 'account_removed' | 'proxy_added' | 'proxy_removed' | 'settings' | 'failover' | 'error';
   detail: string;
 }
 
@@ -80,6 +80,13 @@ export class Metrics {
     this.retries += 1;
   }
 
+  failovers = 0;
+
+  failover(from: string, to: string): void {
+    this.failovers += 1;
+    this.record('failover', `provider failover: ${from} → ${to}`);
+  }
+
   /** Estimated tokens saved by the token saver (chars/4 heuristic). */
   addTokensSaved(n: number): void {
     this.tokensSaved += n;
@@ -141,6 +148,7 @@ export class Metrics {
       rateLimited: this.rateLimited,
       rotations: this.rotations,
       retries: this.retries,
+      failovers: this.failovers,
       tokensSaved: this.tokensSaved,
       perAccount: Object.fromEntries(this.perAccount),
     };
