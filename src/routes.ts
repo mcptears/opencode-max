@@ -83,6 +83,18 @@ export async function aggregateModels(
   const seen = new Set<string>();
   const data: unknown[] = [];
   for (const p of getProviders().filter((x) => x.enabled)) {
+    // qwen-web has no upstream /models endpoint — synthesize from its config.
+    if (p.protocol === 'qwen-web') {
+      const qwen = p.qwen ?? { defaultModel: 'qwen3.7-plus' };
+      const ids = [...Object.keys(qwen.modelMap ?? {}), qwen.defaultModel];
+      for (const id of ids) {
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          data.push({ id, object: 'model', owned_by: 'qwen' });
+        }
+      }
+      continue;
+    }
     const account = pool.acquire(p.id);
     try {
       const controller = new AbortController();
