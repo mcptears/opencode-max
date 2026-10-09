@@ -531,6 +531,7 @@ async function loadUpProviders() {
       <li>
         <span><strong>${esc(p.name)}</strong> <span class="hint">${esc(p.baseUrl)}</span><br>
         <span class="hint">models: ${esc((p.models || []).join(', '))}</span>
+        ${p.protocol === 'qwen-web' ? '<span class="tag">qwen-web</span>' : ''}
         <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></span>
         <span class="row-btns">
           <button class="btn" data-ptest="${esc(p.id)}">Test</button>
@@ -565,26 +566,86 @@ async function loadUpProviders() {
   } catch { /* ignore */ }
 }
 
+$('#providerProtocol').onchange = (e) => {
+  $('#qwenOpts').hidden = e.target.value !== 'qwen-web';
+};
+
 $('#providerForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, msg = $('#providerMsg');
-  const r = await api('/api/providers', {
-    method: 'POST',
-    body: JSON.stringify({
-      id: f.id.value.trim(), name: f.name.value.trim(),
-      baseUrl: f.baseUrl.value.trim(),
-      models: f.models.value.split(',').map((s) => s.trim()).filter(Boolean),
-    }),
-  });
-  if (r.ok) { f.reset(); msg.textContent = '✓ Provider added.'; loadUpProviders(); }
+  const payload = {
+    id: f.id.value.trim(), name: f.name.value.trim(),
+    baseUrl: f.baseUrl.value.trim(),
+    models: f.models.value.split(',').map((s) => s.trim()).filter(Boolean),
+  };
+  if (f.protocol.value === 'qwen-web') {
+    payload.protocol = 'qwen-web';
+    const qwen = {};
+    if (f.qwenDefaultModel.value.trim()) qwen.defaultModel = f.qwenDefaultModel.value.trim();
+    if (f.qwenModelMap.value.trim()) {
+      try {
+        qwen.modelMap = JSON.parse(f.qwenModelMap.value);
+      } catch {
+        msg.textContent = '✕ model map is not valid JSON';
+        return;
+      }
+    }
+    payload.qwen = qwen;
+  }
+  const r = await api('/api/providers', { method: 'POST', body: JSON.stringify(payload) });
+  if (r.ok) { f.reset(); $('#qwenOpts').hidden = true; msg.textContent = '✓ Provider added.'; loadUpProviders(); }
   else msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
 };
 
 $('#qwenPresetBtn').onclick = async () => {
   const msg = $('#providerMsg');
   const r = await api('/api/providers/preset/qwen', { method: 'POST' });
-  msg.textContent = r.ok ? '✓ Qwen provider added — point your qwen2api at :8765.' : '✕ ' + (await r.text()).slice(0, 200);
+  if (r.ok) {
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = j.upgraded ? '✓ Qwen provider upgraded to the built-in native version.' : '✓ Qwen provider added — now connect your Qwen account.';
+  } else {
+    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
+  }
   loadUpProviders();
+};
+
+// ---- Connect Qwen account ----
+$('#qwenConnectBtn').onclick = () => {
+  $('#qwenConnectMsg').textContent = '';
+  $('#qwenConnectForm').reset();
+  $('#qwenConnectModal').hidden = false;
+};
+$('#qwenConnectClose').onclick = () => { $('#qwenConnectModal').hidden = true; };
+
+$('#qwenConnectForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#qwenConnectMsg');
+  const credential = f.credential.value.trim();
+  if (!credential) { msg.textContent = '✕ paste your Qwen token first'; return; }
+  msg.textContent = 'Validating token…';
+  try {
+    const v = await (await api('/api/accounts/validate-qwen', {
+      method: 'POST', body: JSON.stringify({ credential }),
+    })).json();
+    if (!v.ok) { msg.textContent = '✕ ' + (v.error || 'token rejected'); return; }
+    const list = await (await api('/api/accounts')).json();
+    const ids = new Set((list.accounts || []).map((a) => a.id));
+    let n = 1;
+    while (ids.has(`qwen-${n}`)) n++;
+    const r = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: `qwen-${n}`, name: f.name.value.trim() || `Qwen ${n}`,
+        provider: 'qwen', apiKey: credential, priority: Number(f.priority.value) || n,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+    msg.textContent = '✓ Qwen account connected.';
+    $('#qwenConnectModal').hidden = true;
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
 };
 
 // ---- Account edit modal ----
