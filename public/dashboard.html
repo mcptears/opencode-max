@@ -76,11 +76,32 @@
             <select name="provider" id="accountProvider"></select>
             <input name="apiKey" type="password" placeholder="API key (empty = keyless provider)" autocomplete="off">
             <input name="priority" type="number" min="1" value="1" placeholder="priority">
+            <input name="cooldownPeriod" type="number" min="0" placeholder="cooldown ms (empty = default)">
+            <input name="baseUrl" placeholder="upstream override URL (empty = default)">
+            <input name="quotaLimit" type="number" min="1" placeholder="5h quota (empty = global)">
             <button class="btn primary" type="submit">Add account</button>
           </form>
           <div id="accountMsg" class="hint"></div>
         </div>
       </section>
+
+      <div class="modal-backdrop" id="accountEditModal" hidden>
+        <div class="modal">
+          <div class="modal-head"><h3>Edit account <code id="editAccountId"></code></h3><button class="btn" id="accountEditClose">✕</button></div>
+          <form id="accountEditForm" class="form-grid">
+            <label>Display name<input name="name" required></label>
+            <label>Provider<select name="provider" id="editAccountProvider"></select></label>
+            <label>API key <span class="hint">empty = keep current</span><input name="apiKey" type="password" placeholder="•••••••• (unchanged)" autocomplete="off"></label>
+            <label class="check"><input name="clearApiKey" type="checkbox"> Remove key (make keyless)</label>
+            <label>Priority<input name="priority" type="number" min="1"></label>
+            <label>Cooldown (ms)<input name="cooldownPeriod" type="number" min="0" placeholder="empty = default"></label>
+            <label>Upstream override URL<input name="baseUrl" placeholder="empty = default"></label>
+            <label>5h quota<input name="quotaLimit" type="number" min="1" placeholder="empty = global"></label>
+            <button class="btn primary" type="submit">Save changes</button>
+          </form>
+          <div id="accountEditMsg" class="hint"></div>
+        </div>
+      </div>
 
       <div class="modal-backdrop" id="connectModal" hidden>
         <div class="modal">
@@ -208,6 +229,7 @@
             <label>Spike window (minutes)<input name="errorSpikeWindowMin" type="number" min="1" placeholder="10"></label>
             <label>Spike min requests<input name="errorSpikeMinRequests" type="number" min="1" placeholder="10"></label>
             <label>Request timeout (ms)<input name="requestTimeoutMs" type="number" min="1000"></label>
+            <label>Shutdown drain (ms)<input name="shutdownDrainMs" type="number" min="0" placeholder="30000"></label>
             <label>Port<input name="port" type="number" min="1" max="65535"></label>
             <label>Admin token<input name="adminToken" type="password" placeholder="empty = open on localhost"></label>
             <label>Log file<input name="logFile" type="text" placeholder="/var/log/opencode-max.log (empty = stdout only)"></label>
