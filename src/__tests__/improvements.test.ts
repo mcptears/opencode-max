@@ -3,7 +3,7 @@ import { AccountPool } from '../accountPool.js';
 import { Metrics } from '../metrics.js';
 import { Alerter } from '../alerts.js';
 import { UpstreamClient } from '../upstreamClient.js';
-import { saveSettings } from '../settings.js';
+import { saveSettings, getSettings } from '../settings.js';
 import type { AccountConfig } from '../config.js';
 import type { ProviderConfig } from '../providers.js';
 
@@ -321,5 +321,29 @@ describe('model fallback chains', () => {
     ).rejects.toMatchObject({ status: 502 });
     expect(calls).toBe(2); // m1 then m2, then stop — no infinite loop
     saveSettings({ modelFallbacks: {} });
+  });
+});
+
+describe('error-spike alerts', () => {
+  it('errorRate measures the trailing window', () => {
+    const metrics = new Metrics();
+    metrics.logRequest('sp1', 200, 10, 'm');
+    metrics.logRequest('sp1', 502, 10, 'm');
+    metrics.logRequest('sp1', 500, 10, 'm');
+    const w = metrics.errorRate(60_000);
+    expect(w.requests).toBeGreaterThanOrEqual(3);
+    expect(w.errors).toBeGreaterThanOrEqual(2);
+    expect(w.rate).toBeCloseTo(w.errors / w.requests);
+  });
+
+  it('settings round-trip the spike knobs with clamping', () => {
+    saveSettings({ errorSpikeThreshold: 0.75, errorSpikeWindowMin: 5, errorSpikeMinRequests: 20 });
+    const s = getSettings();
+    expect(s.errorSpikeThreshold).toBe(0.75);
+    expect(s.errorSpikeWindowMin).toBe(5);
+    expect(s.errorSpikeMinRequests).toBe(20);
+    saveSettings({ errorSpikeThreshold: 7 });
+    expect(getSettings().errorSpikeThreshold).toBe(1); // clamped
+    saveSettings({ errorSpikeThreshold: 0.5, errorSpikeWindowMin: 10, errorSpikeMinRequests: 10 });
   });
 });
