@@ -173,6 +173,21 @@ export class UpstreamClient {
             attempt--; // queueing is not a real attempt — don't burn the retry budget
             continue;
           }
+          // Concurrency queue: every usable account is at its in-flight cap.
+          // Poll for a free slot instead of 503ing.
+          if (waitMs === 0 && maxWait > 0 && this.pool.atCap(providerId)) {
+            queuedOnce = true;
+            this.metrics?.record('settings', `queueing request on '${providerId}' — waiting for a free account slot`);
+            const deadline = Date.now() + maxWait;
+            while (Date.now() < deadline) {
+              await sleepAbortable(50, req.signal);
+              if (req.signal?.aborted) throw httpError(499, 'client closed request');
+              if (this.pool.hasCapacity(providerId)) break;
+              if (!this.pool.atCap(providerId)) break; // state changed — re-evaluate
+            }
+            attempt--; // queueing is not a real attempt — don't burn the retry budget
+            continue;
+          }
         }
         const msg = this.pool.allInvalid(providerId)
           ? `all API keys are flagged invalid on '${providerId}' — fix them in the dashboard and reset`
@@ -229,6 +244,7 @@ export class UpstreamClient {
         }
       } catch (e) {
         lastError = e; // network-level failure: back off and retry
+        this.pool.release(account.id);
         await sleep(backoff(attempt));
         continue;
       }
@@ -259,12 +275,14 @@ export class UpstreamClient {
               /* ignore */
             }
             lastError = new Error(`invalid API key on account ${account.id}`);
+            this.pool.release(account.id);
             continue; // fail over immediately: no backoff, no IP rotation needed
           }
         }
         this.metrics?.ok();
         if (account.apiKey) this.pool.recordLatency(account.id, Date.now() - attemptStart);
         this.metrics?.logRequest(account.id, upstream.status, Date.now() - startedAt, model);
+        this.pool.release(account.id);
         return this.toResult(upstream);
       }
 
@@ -282,10 +300,12 @@ export class UpstreamClient {
         /* ignore */
       }
       lastError = new Error(`upstream ${upstream.status} on account ${account.id}`);
+      this.pool.release(account.id);
       await sleep(backoff(attempt));
     }
 
     this.metrics?.logRequest(lastAccountId || 'none', 502, Date.now() - startedAt, model);
+    this.pool.release(lastAccountId);
     throw new ProviderExhaustedError(`'${providerId}' unreachable after ${maxRetries + 1} attempts: ${String(lastError)}`);
   }
 
