@@ -39,6 +39,7 @@ async function refresh() {
     renderStatus(await res.json());
     drawTraffic();
     loadModels();
+    loadUsage();
     loadRequests();
   } catch {
     $('#statusPill').textContent = 'offline';
@@ -118,6 +119,18 @@ async function loadModels() {
       return `<tr><td><code>${esc(m.model)}</code></td><td>${esc(m.provider)}</td><td>${m.requests}</td>` +
         `<td>${m.errors} <span class="hint">(${errPct}%)</span></td><td>${m.avgLatencyMs}<small> ms</small></td></tr>`;
     }).join('') || '<tr><td colspan="5" class="hint">no requests yet</td></tr>';
+  } catch { /* ignore */ }
+}
+
+const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+
+async function loadUsage() {
+  try {
+    const { byAccount } = await (await api('/api/usage?hours=24')).json();
+    $('#usageTbl tbody').innerHTML = (byAccount || []).map((u) =>
+      `<tr><td><code>${esc(u.accountId)}</code></td><td>${fmtTok(u.prompt)}</td><td>${fmtTok(u.completion)}</td>` +
+      `<td><strong>${fmtTok(u.total)}</strong></td><td>${u.requests}</td></tr>`,
+    ).join('') || '<tr><td colspan="5" class="hint">no token data yet</td></tr>';
   } catch { /* ignore */ }
 }
 
