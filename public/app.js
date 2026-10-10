@@ -180,18 +180,7 @@ function renderStatus(s) {
   $('#statCards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 
   $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="5" class="hint">no accounts configured</td></tr>';
-  const tb = $('#accountsTbl tbody');
-  tb.innerHTML = accountRows(s, true) || '<tr><td colspan="9" class="hint">no accounts configured</td></tr>';
-  tb.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
-    if (!confirm(`Remove account ${b.dataset.del}?`)) return;
-    await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
-    refresh();
-  });
-  tb.querySelectorAll('[data-reset]').forEach((b) => b.onclick = async () => {
-    await api('/api/accounts/' + encodeURIComponent(b.dataset.reset) + '/reset', { method: 'POST' });
-    refresh();
-  });
-  tb.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openAccountEdit(b.dataset.edit));
+  renderProviderCards();
 
   $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
   const health = window._health || [];
@@ -304,7 +293,8 @@ function openConnect() {
   connectModal.hidden = false;
 }
 function closeConnect() { connectModal.hidden = true; }
-$('#connectBtn').onclick = openConnect;
+const _connectBtn = $('#connectBtn');
+if (_connectBtn) _connectBtn.onclick = openConnect;
 $('#connectClose').onclick = closeConnect;
 $('#connectCancel').onclick = closeConnect;
 connectModal.addEventListener('click', (e) => { if (e.target === connectModal) closeConnect(); });
@@ -563,6 +553,7 @@ async function loadUpProviders() {
     if (sel) sel.innerHTML = upProviders.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const esel = $('#editAccountProvider');
     if (esel) esel.innerHTML = upProviders.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    if (window._lastStatus) renderProviderCards();
   } catch { /* ignore */ }
 }
 
@@ -697,6 +688,130 @@ $('#qwenConnectForm').onsubmit = async (e) => {
     msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
   }
 };
+
+// ---- Provider cards (Accounts page) ----
+const collapsedProviders = new Set();
+
+function providerModelList(p) {
+  if (p.protocol === 'qwen-web') {
+    const map = (p.qwen && p.qwen.modelMap) || {};
+    const names = [p.qwen && p.qwen.defaultModel, ...Object.keys(map)].filter(Boolean);
+    return [...new Set(names)];
+  }
+  return p.models || [];
+}
+
+function providerCardRows(accounts, s) {
+  const globalLimit = s.quota5hLimit || 200;
+  return accounts.map((a) => {
+    const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}">Reset</button>` : '';
+    const limit = a.quotaLimit || globalLimit;
+    const usage = a.usage5h || 0;
+    return `<tr><td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td>` +
+      `<td>P${a.priority}</td>` +
+      `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span></td>` +
+      `<td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>` +
+      `<td>${fmtMs(a.cooldownEndsInMs)}</td>` +
+      `<td><div class="row-btns"><button class="btn danger" data-del="${esc(a.id)}">Remove</button>` +
+      `<button class="btn" data-edit="${esc(a.id)}">Edit</button>${resetBtn}</div></td></tr>`;
+  }).join('');
+}
+
+function renderProviderCards() {
+  const el = $('#providerCards');
+  const s = window._lastStatus;
+  if (!el || !s) return;
+  const accounts = s.accounts || [];
+  const cards = upProviders.map((p) => {
+    const accs = accounts.filter((a) => a.provider === p.id);
+    const active = accs.filter((a) => a.state === 'active').length;
+    const open = !collapsedProviders.has(p.id);
+    const models = providerModelList(p);
+    const connectBtn = p.id === 'qwen'
+      ? `<button class="btn primary" data-qconnect>Connect Qwen account</button>`
+      : p.id === 'opencode-zen'
+        ? `<button class="btn primary" data-oconnect>Connect OpenCode account</button>`
+        : '';
+    return `<div class="pcard">
+      <div class="pcard-head" data-phead="${esc(p.id)}">
+        <div><h3>${esc(p.name)}
+          ${p.protocol === 'qwen-web' ? '<span class="tag">qwen-web</span>' : ''}
+          <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></h3>
+          <div class="pcard-count">${accs.length} account${accs.length === 1 ? '' : 's'}${active !== accs.length ? ` · ${active} active` : ''} · ${esc(p.baseUrl || '')}</div>
+        </div>
+        <div class="row-btns" data-pactions="${esc(p.id)}">
+          <button class="btn" data-ptest="${esc(p.id)}">Test</button>
+          ${connectBtn}
+          <button class="btn" data-ptoggle-head="${esc(p.id)}">${open ? '▾' : '▸'}</button>
+        </div>
+      </div>
+      <div class="pcard-body" ${open ? '' : 'hidden'}>
+        <div><div class="hint">Models</div>
+          <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
+        </div>
+        <div><div class="hint">Accounts</div>
+          ${accs.length ? `<table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>5h usage</th><th>State</th><th>Cooldown</th><th></th></tr></thead><tbody>${providerCardRows(accs, s)}</tbody></table>`
+            : '<div class="hint">no accounts yet — connect one above</div>'}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Ghost card: offer the built-in Qwen provider when it isn't added yet.
+  const ghost = upProviders.some((p) => p.id === 'qwen') ? '' :
+    `<div class="pcard ghost">
+      <div class="pcard-head"><div><h3>Qwen <span class="tag">qwen-web</span> <span class="tag">built-in</span></h3>
+      <div class="pcard-count">free Qwen chat — no separate deployment</div></div>
+      <div class="row-btns"><button class="btn primary" data-qpreset>Add Qwen provider</button></div></div>
+    </div>`;
+
+  el.innerHTML = cards + ghost || '<div class="hint">no providers configured</div>';
+
+  el.querySelectorAll('[data-phead]').forEach((h) => h.onclick = (e) => {
+    if (e.target.closest('[data-pactions]')) return;
+    const id = h.dataset.phead;
+    collapsedProviders.has(id) ? collapsedProviders.delete(id) : collapsedProviders.add(id);
+    renderProviderCards();
+  });
+  el.querySelectorAll('[data-ptoggle-head]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const id = b.dataset.ptoggleHead;
+    collapsedProviders.has(id) ? collapsedProviders.delete(id) : collapsedProviders.add(id);
+    renderProviderCards();
+  });
+  el.querySelectorAll('[data-ptest]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    b.disabled = true; b.textContent = '…';
+    try {
+      const t = await (await api('/api/providers/' + encodeURIComponent(b.dataset.ptest) + '/test', { method: 'POST' })).json();
+      b.textContent = t.ok ? `✓ ${t.models} models` : `✕ ${t.error || 'failed'}`;
+    } catch { b.textContent = '✕ error'; }
+    setTimeout(() => { b.disabled = false; b.textContent = 'Test'; }, 2500);
+  });
+  el.querySelectorAll('[data-qconnect]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    $('#qwenConnectMsg').textContent = '';
+    $('#qwenConnectModal').hidden = false;
+  });
+  el.querySelectorAll('[data-oconnect]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openConnect(); });
+  el.querySelectorAll('[data-qpreset]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    const r = await api('/api/providers/preset/qwen', { method: 'POST' });
+    if (r.ok || r.status === 409) { await loadUpProviders(); renderProviderCards(); }
+    else { b.textContent = '✕ failed'; setTimeout(() => { b.disabled = false; b.textContent = 'Add Qwen provider'; }, 2000); }
+  });
+  el.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!confirm(`Remove account ${b.dataset.del}?`)) return;
+    await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
+    refresh();
+  });
+  el.querySelectorAll('[data-reset]').forEach((b) => b.onclick = async () => {
+    await api('/api/accounts/' + encodeURIComponent(b.dataset.reset) + '/reset', { method: 'POST' });
+    refresh();
+  });
+  el.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openAccountEdit(b.dataset.edit));
+}
 
 // ---- Account edit modal ----
 function openAccountEdit(id) {
