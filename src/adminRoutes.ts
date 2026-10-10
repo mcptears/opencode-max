@@ -9,10 +9,11 @@ import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parse
 import { reinitFileLogger } from './logger.js';
 import { renderPrometheus } from './prometheus.js';
 import { validateQwenCredential, qwenSignIn } from './qwenWeb.js';
+import { validateDeepSeekCredential, deepseekSignIn } from './deepseekWeb.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { createHash } from 'node:crypto';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
-import { loadProviders, saveProviders, QWEN_PRESET, type ProviderConfig } from './providers.js';
+import { loadProviders, saveProviders, QWEN_PRESET, DEEPSEEK_PRESET, type ProviderConfig } from './providers.js';
 import type { ScraperJob } from './scraperJob.js';
 
 export interface AdminContext {
@@ -215,6 +216,74 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.status(201).json({ ok: true, id: account.id });
   });
 
+  /** Validate a DeepSeek userToken without adding it. */
+  router.post('/api/accounts/validate-deepseek', async (req, res) => {
+    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown };
+    const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+    if (!credential) {
+      res.status(400).json({ ok: false, error: 'credential is required' });
+      return;
+    }
+    const base =
+      typeof body.baseUrl === 'string' && body.baseUrl.trim()
+        ? body.baseUrl.trim().replace(/\/+$/, '')
+        : (loadProviders().find((p) => p.protocol === 'deepseek-web')?.baseUrl ?? 'https://chat.deepseek.com');
+    const r = await validateDeepSeekCredential(base, credential);
+    res.json(r);
+  });
+
+  /**
+   * Sign in to DeepSeek with email + password and connect the account in one
+   * step — no DevTools needed. The browser should SHA-256 the password
+   * first (it never needs to send the plaintext); if it sends `password`
+   * instead, the server hashes it before forwarding. The password is never
+   * stored — only the DeepSeek session token lands in the account pool.
+   *
+   * Note: DeepSeek invalidates the previous token on every login, so only
+   * the most recent session per account stays valid.
+   */
+  router.post('/api/accounts/deepseek-login', async (req, res) => {
+    const body = jsonBody(req) as { email?: unknown; passwordHash?: unknown; password?: unknown; name?: unknown; priority?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    let passwordHash = typeof body.passwordHash === 'string' ? body.passwordHash.trim() : '';
+    if (!passwordHash && typeof body.password === 'string' && body.password) {
+      passwordHash = createHash('sha256').update(body.password).digest('hex');
+    }
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ ok: false, error: 'a valid email is required' });
+      return;
+    }
+    if (!/^[0-9a-f]{64}$/i.test(passwordHash)) {
+      res.status(400).json({ ok: false, error: 'password is required' });
+      return;
+    }
+    // Make sure the native DeepSeek provider exists so the account has a home.
+    const providers = loadProviders();
+    let dsProvider = providers.find((p) => p.protocol === 'deepseek-web');
+    if (!dsProvider) {
+      providers.push({ ...DEEPSEEK_PRESET });
+      saveProviders(providers);
+      dsProvider = providers[providers.length - 1];
+      metrics.record('settings', 'native deepseek provider preset added (via DeepSeek sign-in)');
+    }
+    const login = await deepseekSignIn(dsProvider.baseUrl, email, passwordHash);
+    if (!login.ok) {
+      res.json(login);
+      return;
+    }
+    const accounts = readAccounts();
+    let n = 1;
+    while (accounts.some((a) => a.id === `deepseek-${n}`)) n++;
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : email.split('@')[0];
+    const priority = typeof body.priority === 'number' && Number.isFinite(body.priority) ? body.priority : n;
+    const account: AccountConfig = { id: `deepseek-${n}`, name, provider: dsProvider.id, apiKey: login.credential, priority };
+    accounts.push(account);
+    writeAccounts(accounts);
+    pool.replace(accounts);
+    metrics.record('account_added', `deepseek account '${account.id}' connected via sign-in`);
+    res.status(201).json({ ok: true, id: account.id });
+  });
+
   /** Check an API key against upstream without adding it (Connect flow).
    *  The models catalog is public, so validation sends a minimal 1-token
    *  chat ping: 401 with an auth-flavoured body means a bad key; anything
@@ -297,6 +366,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       providers.push({ ...QWEN_PRESET });
       saveProviders(providers);
       metrics.record('settings', 'native qwen provider preset added (auto, on account connect)');
+    }
+    // Same for DeepSeek: a deepseek account needs the native provider.
+    if (v.account.provider === DEEPSEEK_PRESET.id && !loadProviders().some((p) => p.id === DEEPSEEK_PRESET.id)) {
+      const providers = loadProviders();
+      providers.push({ ...DEEPSEEK_PRESET });
+      saveProviders(providers);
+      metrics.record('settings', 'native deepseek provider preset added (auto, on account connect)');
     }
     accounts.push(v.account);
     writeAccounts(accounts);
@@ -388,6 +464,22 @@ export function buildAdminRouter(ctx: AdminContext): Router {
         ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
       };
     }
+    if (b.protocol === 'deepseek-web') {
+      const q = (b.deepseek ?? {}) as Record<string, unknown>;
+      const modelMap: Record<string, string> = {};
+      if (q.modelMap && typeof q.modelMap === 'object') {
+        for (const [k, v] of Object.entries(q.modelMap as Record<string, unknown>)) {
+          if (typeof v === 'string' && v.trim()) modelMap[k] = v.trim();
+        }
+      }
+      provider.protocol = 'deepseek-web';
+      provider.deepseek = {
+        defaultModel: typeof q.defaultModel === 'string' && q.defaultModel.trim() ? q.defaultModel.trim() : 'deepseek-chat',
+        ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
+        ...(typeof q.thinkingEnabled === 'boolean' ? { thinkingEnabled: q.thinkingEnabled } : {}),
+        ...(typeof q.searchEnabled === 'boolean' ? { searchEnabled: q.searchEnabled } : {}),
+      };
+    }
     return { ok: true, provider };
   }
 
@@ -466,6 +558,20 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.status(201).json({ ok: true, provider: QWEN_PRESET });
   });
 
+  /** One-click preset: native DeepSeek web provider (built into opencode-max). */
+  router.post('/api/providers/preset/deepseek', (_req, res) => {
+    const providers = loadProviders();
+    const existing = providers.find((p) => p.id === DEEPSEEK_PRESET.id);
+    if (existing) {
+      res.status(409).json({ error: { message: 'deepseek provider already exists', status: 409 } });
+      return;
+    }
+    providers.push({ ...DEEPSEEK_PRESET });
+    saveProviders(providers);
+    metrics.record('settings', 'native deepseek provider preset added');
+    res.status(201).json({ ok: true, provider: DEEPSEEK_PRESET });
+  });
+
   /** Test a provider's /models endpoint (no keys leaked). */
   router.post('/api/providers/:id/test', async (req, res) => {
     const p = loadProviders().find((x) => x.id === req.params.id);
@@ -484,6 +590,17 @@ export function buildAdminRouter(ctx: AdminContext): Router {
         }
         const v = await validateQwenCredential(p.baseUrl, account.apiKey);
         res.json(v.ok ? { ok: true, models: Object.keys(p.qwen?.modelMap ?? {}).length + 1 } : { ok: false, error: v.error });
+        return;
+      }
+      // deepseek-web has no /models endpoint either — same credential probe.
+      if (p.protocol === 'deepseek-web') {
+        if (account) pool.release(account.id);
+        if (!account?.apiKey) {
+          res.json({ ok: false, error: 'no DeepSeek account connected — use Connect DeepSeek account' });
+          return;
+        }
+        const v = await validateDeepSeekCredential(p.baseUrl, account.apiKey);
+        res.json(v.ok ? { ok: true, models: Object.keys(p.deepseek?.modelMap ?? {}).length + 1 } : { ok: false, error: v.error });
         return;
       }
       const controller = new AbortController();
