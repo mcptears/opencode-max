@@ -21,6 +21,17 @@ export interface DeepSeekWebOptions {
   searchEnabled?: boolean;
 }
 
+export interface ZaiWebOptions {
+  /** Default Z.ai web model id when the request model has no mapping. */
+  defaultModel: string;
+  /** opencode-max model name -> Z.ai web model id. */
+  modelMap?: Record<string, string>;
+  /** Default thinking for requests without an explicit model marker. */
+  thinkingEnabled?: boolean;
+  /** Default web search for requests without an explicit model marker. */
+  searchEnabled?: boolean;
+}
+
 export interface ProviderConfig {
   /** Stable id, e.g. "opencode-zen". Accounts reference it via their `provider` field. */
   id: string;
@@ -33,13 +44,16 @@ export interface ProviderConfig {
   /**
    * Upstream protocol. `openai` (default) forwards OpenAI-format requests
    * untouched; `qwen-web` speaks Qwen's private web API natively inside
-   * opencode-max; `deepseek-web` does the same for DeepSeek's.
+   * opencode-max; `deepseek-web` does the same for DeepSeek's; `zai-web`
+   * does the same for Z.ai's (chat.z.ai).
    */
-  protocol?: 'openai' | 'qwen-web' | 'deepseek-web';
+  protocol?: 'openai' | 'qwen-web' | 'deepseek-web' | 'zai-web';
   /** Qwen web options (only used when protocol is 'qwen-web'). */
   qwen?: QwenWebOptions;
   /** DeepSeek web options (only used when protocol is 'deepseek-web'). */
   deepseek?: DeepSeekWebOptions;
+  /** Z.ai web options (only used when protocol is 'zai-web'). */
+  zai?: ZaiWebOptions;
 }
 
 export const PROVIDERS_FILE = path.join(projectRoot(), 'providers.json');
@@ -58,6 +72,26 @@ export const DEEPSEEK_PRESET: ProviderConfig = {
       'deepseek-r1': 'deepseek-reasoner',
       'deepseek-think': 'deepseek-reasoner',
       'deepseek-pro': 'deepseek-expert',
+    },
+  },
+};
+
+/** One-click preset: native Z.ai web provider (built into opencode-max). */
+export const ZAI_PRESET: ProviderConfig = {
+  id: 'zai',
+  name: 'Z.ai (built-in)',
+  baseUrl: 'https://chat.z.ai',
+  models: ['glm*'],
+  enabled: true,
+  protocol: 'zai-web',
+  zai: {
+    defaultModel: 'glm-5',
+    modelMap: {
+      'glm-4.7': 'glm-4.7',
+      'glm-4.5': 'glm-4.5',
+      'glm-5-flash': 'glm-5-flash',
+      'glm-5.3': 'glm-5.3',
+      'glm-5.2': 'glm-5.2',
     },
   },
 };
@@ -106,7 +140,7 @@ function normalize(p: unknown): ProviderConfig | null {
   const models = Array.isArray(r.models)
     ? (r.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
     : [];
-  const protocol = r.protocol === 'qwen-web' || r.protocol === 'deepseek-web' ? r.protocol : 'openai';
+  const protocol = r.protocol === 'qwen-web' || r.protocol === 'deepseek-web' || r.protocol === 'zai-web' ? r.protocol : 'openai';
   let qwen: QwenWebOptions | undefined;
   if (protocol === 'qwen-web' && r.qwen && typeof r.qwen === 'object') {
     const q = r.qwen as Record<string, unknown>;
@@ -137,6 +171,22 @@ function normalize(p: unknown): ProviderConfig | null {
       ...(typeof q.searchEnabled === 'boolean' ? { searchEnabled: q.searchEnabled } : {}),
     };
   }
+  let zai: ZaiWebOptions | undefined;
+  if (protocol === 'zai-web' && r.zai && typeof r.zai === 'object') {
+    const q = r.zai as Record<string, unknown>;
+    const modelMap: Record<string, string> = {};
+    if (q.modelMap && typeof q.modelMap === 'object') {
+      for (const [k, v] of Object.entries(q.modelMap as Record<string, unknown>)) {
+        if (typeof v === 'string' && v.trim()) modelMap[k] = v.trim();
+      }
+    }
+    zai = {
+      defaultModel: typeof q.defaultModel === 'string' && q.defaultModel.trim() ? q.defaultModel.trim() : 'glm-5',
+      ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
+      ...(typeof q.thinkingEnabled === 'boolean' ? { thinkingEnabled: q.thinkingEnabled } : {}),
+      ...(typeof q.searchEnabled === 'boolean' ? { searchEnabled: q.searchEnabled } : {}),
+    };
+  }
   return {
     id: r.id.trim(),
     name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : r.id.trim(),
@@ -145,6 +195,7 @@ function normalize(p: unknown): ProviderConfig | null {
     enabled: r.enabled !== false,
     ...(protocol === 'qwen-web' ? { protocol, qwen: qwen ?? { defaultModel: 'qwen3.7-plus' } } : {}),
     ...(protocol === 'deepseek-web' ? { protocol, deepseek: deepseek ?? { defaultModel: 'deepseek-chat' } } : {}),
+    ...(protocol === 'zai-web' ? { protocol, zai: zai ?? { defaultModel: 'glm-5' } } : {}),
   };
 }
 
