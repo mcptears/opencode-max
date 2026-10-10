@@ -163,6 +163,18 @@ Qwen runs **natively inside opencode-max** — it speaks Qwen's web API directly
 
 Each request runs in a disposable upstream chat (created, used, deleted), so your Qwen account doesn't fill up with chats. Thinking phases stream back as `reasoning_content`. The provider's Qwen web model id and the friendly-name → model-id map are editable in the provider settings. Qwen risk-control responses park the account in cooldown automatically instead of burning it.
 
+### DeepSeek (built-in, no separate deployment)
+
+DeepSeek runs **natively inside opencode-max** — it speaks `chat.deepseek.com`'s web API directly, including its proof-of-work challenge (solved locally, no browser needed):
+
+1. In the dashboard, hit **Add DeepSeek provider** (or `POST /api/providers/preset/deepseek`).
+2. Hit **Connect DeepSeek account** and pick a tab:
+   - **Sign in** — your DeepSeek email + password, the same login as `chat.deepseek.com`. The password is SHA-256 hashed in your browser and never stored; only the session token lands in the account pool. Note: each sign-in invalidates the previous session for that account.
+   - **Paste token** — sign in at `chat.deepseek.com`, run `JSON.parse(localStorage.getItem("userToken")).value` in DevTools, paste the token. It's validated live before anything is saved.
+3. Ask for a DeepSeek model — `deepseek-chat`, `deepseek-reasoner`, `deepseek-expert` — and it routes there, with the same proxy rotation, retries, quota tracking and session handling as Zen.
+
+The provider page has **DeepThink** and **Web search** toggles — they set the default for all requests to that provider, while explicit model names still win (`deepseek-reasoner` forces DeepThink, `*search*` forces web search). Reasoning streams back as `reasoning_content`. Each request runs in a disposable upstream session (created, PoW-solved, used, deleted).
+
 ### Cross-provider failover
 
 When a provider's accounts are all exhausted (or its upstream is down), the request automatically spills over to the next eligible provider instead of returning 503 — a provider is eligible if its model patterns match the request or it's a catch-all. Failovers are counted on the Overview dashboard and logged in the event feed.
@@ -367,7 +379,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 184 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 223 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
