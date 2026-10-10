@@ -821,8 +821,15 @@ function openDsConnect() {
   $('#dsConnectForm').reset();
   const sf = $('#dsSigninForm');
   if (sf) sf.reset();
+  const vf = $('#dsVerifyForm');
+  if (vf) { vf.reset(); vf.hidden = true; }
+  if (sf) sf.hidden = false;
+  dsPendingSignin = null;
   $('#dsConnectModal').hidden = false;
 }
+
+// Holds email+passwordHash while DeepSeek's email verification step is pending.
+let dsPendingSignin = null;
 
 $('#dsSigninForm').onsubmit = async (e) => {
   e.preventDefault();
@@ -838,11 +845,61 @@ $('#dsSigninForm').onsubmit = async (e) => {
       : { email, password, name: f.name.value.trim() }; // server hashes
     const r = await api('/api/accounts/deepseek-login', { method: 'POST', body: JSON.stringify(payload) });
     const j = await r.json().catch(() => ({}));
+    if (j.needCode) {
+      // DeepSeek's risk control wants an email verification code.
+      dsPendingSignin = { email, passwordHash: hash || null, password: hash ? null : password, name: f.name.value.trim() };
+      $('#dsVerifyHint').textContent = j.message || 'DeepSeek sent a verification code to your email — enter it to finish signing in.';
+      $('#dsSigninForm').hidden = true;
+      $('#dsVerifyForm').hidden = false;
+      msg.textContent = '';
+      return;
+    }
     if (!j.ok) { msg.textContent = '✕ ' + (j.error || 'sign-in failed'); return; }
     msg.textContent = '✓ DeepSeek account connected.';
     $('#dsConnectModal').hidden = true;
     loadUpProviders();
     refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
+};
+
+$('#dsVerifyForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#dsConnectMsg');
+  const code = f.code.value.trim();
+  if (!code) { msg.textContent = '✕ enter the verification code from your email'; return; }
+  if (!dsPendingSignin) { msg.textContent = '✕ sign-in expired — start over'; return; }
+  msg.textContent = 'Verifying…';
+  try {
+    const p = dsPendingSignin;
+    const payload = p.passwordHash
+      ? { email: p.email, passwordHash: p.passwordHash, name: p.name, verificationCode: code }
+      : { email: p.email, password: p.password, name: p.name, verificationCode: code };
+    const r = await api('/api/accounts/deepseek-login', { method: 'POST', body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (j.needCode) { msg.textContent = '✕ ' + (j.message || 'code not accepted — try again'); return; }
+    if (!j.ok) { msg.textContent = '✕ ' + (j.error || 'verification failed'); return; }
+    dsPendingSignin = null;
+    msg.textContent = '✓ DeepSeek account connected.';
+    $('#dsConnectModal').hidden = true;
+    loadUpProviders();
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
+};
+
+$('#dsResendCode').onclick = async () => {
+  const msg = $('#dsConnectMsg');
+  if (!dsPendingSignin) return;
+  msg.textContent = 'Resending code…';
+  try {
+    const r = await api('/api/accounts/deepseek-resend-code', {
+      method: 'POST', body: JSON.stringify({ email: dsPendingSignin.email }),
+    });
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = j.ok ? '✓ code resent — check your email' : '✕ ' + (j.error || 'resend failed');
   } catch (err) {
     msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
   }
