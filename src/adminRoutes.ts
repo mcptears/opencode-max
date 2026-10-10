@@ -13,7 +13,8 @@ import { validateDeepSeekCredential, deepseekSignIn, resendDeepSeekCode } from '
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { createHash } from 'node:crypto';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
-import { loadProviders, saveProviders, QWEN_PRESET, DEEPSEEK_PRESET, type ProviderConfig } from './providers.js';
+import { loadProviders, saveProviders, QWEN_PRESET, DEEPSEEK_PRESET, ZAI_PRESET, type ProviderConfig } from './providers.js';
+import { validateZaiCredential } from './zaiWeb.js';
 import type { ScraperJob } from './scraperJob.js';
 
 export interface AdminContext {
@@ -389,6 +390,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       saveProviders(providers);
       metrics.record('settings', 'native deepseek provider preset added (auto, on account connect)');
     }
+    // Same for Z.ai: a zai account needs the native provider.
+    if (v.account.provider === ZAI_PRESET.id && !loadProviders().some((p) => p.id === ZAI_PRESET.id)) {
+      const providers = loadProviders();
+      providers.push({ ...ZAI_PRESET });
+      saveProviders(providers);
+      metrics.record('settings', 'native z.ai provider preset added (auto, on account connect)');
+    }
     accounts.push(v.account);
     writeAccounts(accounts);
     pool.replace(accounts);
@@ -495,6 +503,22 @@ export function buildAdminRouter(ctx: AdminContext): Router {
         ...(typeof q.searchEnabled === 'boolean' ? { searchEnabled: q.searchEnabled } : {}),
       };
     }
+    if (b.protocol === 'zai-web') {
+      const q = (b.zai ?? {}) as Record<string, unknown>;
+      const modelMap: Record<string, string> = {};
+      if (q.modelMap && typeof q.modelMap === 'object') {
+        for (const [k, v] of Object.entries(q.modelMap as Record<string, unknown>)) {
+          if (typeof v === 'string' && v.trim()) modelMap[k] = v.trim();
+        }
+      }
+      provider.protocol = 'zai-web';
+      provider.zai = {
+        defaultModel: typeof q.defaultModel === 'string' && q.defaultModel.trim() ? q.defaultModel.trim() : 'glm-5',
+        ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
+        ...(typeof q.thinkingEnabled === 'boolean' ? { thinkingEnabled: q.thinkingEnabled } : {}),
+        ...(typeof q.searchEnabled === 'boolean' ? { searchEnabled: q.searchEnabled } : {}),
+      };
+    }
     return { ok: true, provider };
   }
 
@@ -587,6 +611,40 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.status(201).json({ ok: true, provider: DEEPSEEK_PRESET });
   });
 
+  /** One-click preset: native Z.ai web provider (built into opencode-max). */
+  router.post('/api/providers/preset/zai', (_req, res) => {
+    const providers = loadProviders();
+    const existing = providers.find((p) => p.id === ZAI_PRESET.id);
+    if (existing) {
+      res.status(409).json({ error: { message: 'z.ai provider already exists', status: 409 } });
+      return;
+    }
+    providers.push({ ...ZAI_PRESET });
+    saveProviders(providers);
+    metrics.record('settings', 'native z.ai provider preset added');
+    res.status(201).json({ ok: true, provider: ZAI_PRESET });
+  });
+
+  /**
+   * Validate a pasted Z.ai token (DevTools -> Application -> Local Storage ->
+   * "token" on chat.z.ai, after signing in and solving the captcha in the
+   * user's own browser). No password is ever involved.
+   */
+  router.post('/api/accounts/validate-zai', async (req, res) => {
+    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown };
+    const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+    if (!credential) {
+      res.status(400).json({ ok: false, error: 'token is required' });
+      return;
+    }
+    const base =
+      typeof body.baseUrl === 'string' && body.baseUrl.trim()
+        ? body.baseUrl.trim().replace(/\/+$/, '')
+        : (loadProviders().find((p) => p.protocol === 'zai-web')?.baseUrl ?? 'https://chat.z.ai');
+    const r = await validateZaiCredential(base, credential);
+    res.json(r);
+  });
+
   /** Test a provider's /models endpoint (no keys leaked). */
   router.post('/api/providers/:id/test', async (req, res) => {
     const p = loadProviders().find((x) => x.id === req.params.id);
@@ -616,6 +674,17 @@ export function buildAdminRouter(ctx: AdminContext): Router {
         }
         const v = await validateDeepSeekCredential(p.baseUrl, account.apiKey);
         res.json(v.ok ? { ok: true, models: Object.keys(p.deepseek?.modelMap ?? {}).length + 1 } : { ok: false, error: v.error });
+        return;
+      }
+      // zai-web has no /models endpoint either — same credential probe.
+      if (p.protocol === 'zai-web') {
+        if (account) pool.release(account.id);
+        if (!account?.apiKey) {
+          res.json({ ok: false, error: 'no Z.ai account connected — use Connect Z.ai account' });
+          return;
+        }
+        const v = await validateZaiCredential(p.baseUrl, account.apiKey);
+        res.json(v.ok ? { ok: true, models: Object.keys(p.zai?.modelMap ?? {}).length + 1 } : { ok: false, error: v.error });
         return;
       }
       const controller = new AbortController();
