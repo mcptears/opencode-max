@@ -646,6 +646,7 @@ async function loadUpProviders() {
 $('#providerProtocol').onchange = (e) => {
   $('#qwenOpts').hidden = e.target.value !== 'qwen-web';
   $('#dsOpts').hidden = e.target.value !== 'deepseek-web';
+  $('#zaiOpts').hidden = e.target.value !== 'zai-web';
 };
 
 $('#providerForm').onsubmit = async (e) => {
@@ -686,8 +687,24 @@ $('#providerForm').onsubmit = async (e) => {
     deepseek.searchEnabled = f.dsSearch.checked;
     payload.deepseek = deepseek;
   }
+  if (f.protocol.value === 'zai-web') {
+    payload.protocol = 'zai-web';
+    const zai = {};
+    if (f.zaiDefaultModel.value.trim()) zai.defaultModel = f.zaiDefaultModel.value.trim();
+    if (f.zaiModelMap.value.trim()) {
+      try {
+        zai.modelMap = JSON.parse(f.zaiModelMap.value);
+      } catch {
+        msg.textContent = '✕ model map is not valid JSON';
+        return;
+      }
+    }
+    zai.thinkingEnabled = f.zaiThinking.checked;
+    zai.searchEnabled = f.zaiSearch.checked;
+    payload.zai = zai;
+  }
   const r = await api('/api/providers', { method: 'POST', body: JSON.stringify(payload) });
-  if (r.ok) { f.reset(); $('#qwenOpts').hidden = true; $('#dsOpts').hidden = true; msg.textContent = '✓ Provider added.'; loadUpProviders(); }
+  if (r.ok) { f.reset(); $('#qwenOpts').hidden = true; $('#dsOpts').hidden = true; $('#zaiOpts').hidden = true; msg.textContent = '✓ Provider added.'; loadUpProviders(); }
   else msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
 };
 
@@ -708,6 +725,17 @@ $('#dsPresetBtn').onclick = async () => {
   const r = await api('/api/providers/preset/deepseek', { method: 'POST' });
   if (r.ok) {
     msg.textContent = '✓ DeepSeek provider added — now connect your DeepSeek account.';
+  } else {
+    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
+  }
+  loadUpProviders();
+};
+
+$('#zaiPresetBtn').onclick = async () => {
+  const msg = $('#providerMsg');
+  const r = await api('/api/providers/preset/zai', { method: 'POST' });
+  if (r.ok) {
+    msg.textContent = '✓ Z.ai provider added — now connect your Z.ai account.';
   } else {
     msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
   }
@@ -944,6 +972,52 @@ $('#dsConnectForm').onsubmit = async (e) => {
   }
 };
 
+// ---- Connect Z.ai account (paste token — the captcha is solved in the user's own browser) ----
+$('#zaiConnectClose').onclick = () => { $('#zaiConnectModal').hidden = true; };
+$('#zaiConnectBtn').onclick = () => {
+  $('#zaiConnectMsg').textContent = '';
+  $('#zaiConnectForm').reset();
+  $('#zaiConnectModal').hidden = false;
+};
+
+$('#zaiConnectForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#zaiConnectMsg');
+  const credential = f.credential.value.trim();
+  if (!credential) { msg.textContent = '✕ paste your Z.ai token first'; return; }
+  msg.textContent = 'Validating token…';
+  try {
+    const v = await (await api('/api/accounts/validate-zai', {
+      method: 'POST', body: JSON.stringify({ credential }),
+    })).json();
+    if (!v.ok) { msg.textContent = '✕ ' + (v.error || 'token rejected'); return; }
+    // Make sure the Z.ai provider exists. 409 = already there.
+    msg.textContent = 'Setting up Z.ai provider…';
+    const preset = await api('/api/providers/preset/zai', { method: 'POST' });
+    if (!preset.ok && preset.status !== 409) {
+      msg.textContent = '✕ could not add Z.ai provider: ' + (await preset.text()).slice(0, 160);
+      return;
+    }
+    const list = await (await api('/api/accounts')).json();
+    const ids = new Set((list.accounts || []).map((a) => a.id));
+    let n = 1;
+    while (ids.has(`zai-${n}`)) n++;
+    const r = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: `zai-${n}`, name: f.name.value.trim() || `Z.ai ${n}`,
+        provider: 'zai', apiKey: credential, priority: Number(f.priority.value) || n,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+    msg.textContent = '✓ Z.ai account connected.';
+    $('#zaiConnectModal').hidden = true;
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
+};
+
 // ---- Provider cards (Accounts page): click a card for its detail page ----
 function providerModelList(p) {
   if (p.protocol === 'qwen-web') {
@@ -954,6 +1028,11 @@ function providerModelList(p) {
   if (p.protocol === 'deepseek-web') {
     const map = (p.deepseek && p.deepseek.modelMap) || {};
     const names = [p.deepseek && p.deepseek.defaultModel, ...Object.keys(map)].filter(Boolean);
+    return [...new Set(names)];
+  }
+  if (p.protocol === 'zai-web') {
+    const map = (p.zai && p.zai.modelMap) || {};
+    const names = [p.zai && p.zai.defaultModel, ...Object.keys(map)].filter(Boolean);
     return [...new Set(names)];
   }
   return p.models || [];
@@ -989,14 +1068,18 @@ function renderProviderCards() {
       ? `<button class="btn primary" data-qconnect>Connect Qwen account</button>`
       : p.id === 'deepseek'
         ? `<button class="btn primary" data-dsconnect>Connect DeepSeek account</button>`
-        : p.id === 'opencode-zen'
-          ? `<button class="btn primary" data-oconnect>Connect OpenCode account</button>`
-          : '';
+        : p.id === 'zai'
+          ? `<button class="btn primary" data-zaiconnect>Connect Z.ai account</button>`
+          : p.id === 'opencode-zen'
+            ? `<button class="btn primary" data-oconnect>Connect OpenCode account</button>`
+            : '';
     const protoTag = p.protocol === 'qwen-web'
       ? '<span class="tag">qwen-web</span>'
       : p.protocol === 'deepseek-web'
         ? '<span class="tag">deepseek-web</span>'
-        : '';
+        : p.protocol === 'zai-web'
+          ? '<span class="tag">zai-web</span>'
+          : '';
     return `<div class="pcard">
       <div class="pcard-head" data-popen="${esc(p.id)}">
         <div><h3>${esc(p.name)}
@@ -1028,6 +1111,13 @@ function renderProviderCards() {
       <div class="pcard-head"><div><h3>DeepSeek <span class="tag">deepseek-web</span> <span class="tag">built-in</span></h3>
       <div class="pcard-count">free DeepSeek chat — no separate deployment</div></div>
       <div class="row-btns"><button class="btn primary" data-dspreset>Add DeepSeek provider</button></div></div>
+    </div>`);
+  }
+  if (!upProviders.some((p) => p.id === 'zai')) {
+    ghosts.push(`<div class="pcard ghost">
+      <div class="pcard-head"><div><h3>Z.ai <span class="tag">zai-web</span> <span class="tag">built-in</span></h3>
+      <div class="pcard-count">free GLM chat — no separate deployment</div></div>
+      <div class="row-btns"><button class="btn primary" data-zaipreset>Add Z.ai provider</button></div></div>
     </div>`);
   }
 
@@ -1070,6 +1160,19 @@ function renderProviderCards() {
     e.stopPropagation();
     openDsConnect();
   });
+  el.querySelectorAll('[data-zaipreset]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    const r = await api('/api/providers/preset/zai', { method: 'POST' });
+    if (r.ok || r.status === 409) { await loadUpProviders(); renderProviderCards(); }
+    else { b.textContent = '✕ failed'; setTimeout(() => { b.disabled = false; b.textContent = 'Add Z.ai provider'; }, 2000); }
+  });
+  el.querySelectorAll('[data-zaiconnect]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    $('#zaiConnectMsg').textContent = '';
+    $('#zaiConnectForm').reset();
+    $('#zaiConnectModal').hidden = false;
+  });
 }
 
 // ---- Provider detail page ----
@@ -1086,14 +1189,18 @@ async function showProviderDetail(id) {
     ? `<button class="btn primary" id="pdQConnect">Connect Qwen account</button>`
     : p.id === 'deepseek'
       ? `<button class="btn primary" id="pdDsConnect">Connect DeepSeek account</button>`
-      : p.id === 'opencode-zen'
-        ? `<button class="btn primary" id="pdOConnect">Connect OpenCode account</button>`
-        : '';
+      : p.id === 'zai'
+        ? `<button class="btn primary" id="pdZaiConnect">Connect Z.ai account</button>`
+        : p.id === 'opencode-zen'
+          ? `<button class="btn primary" id="pdOConnect">Connect OpenCode account</button>`
+          : '';
   const detailProtoTag = p.protocol === 'qwen-web'
     ? '<span class="tag">qwen-web</span>'
     : p.protocol === 'deepseek-web'
       ? '<span class="tag">deepseek-web</span>'
-      : '<span class="tag">openai</span>';
+      : p.protocol === 'zai-web'
+        ? '<span class="tag">zai-web</span>'
+        : '<span class="tag">openai</span>';
   // DeepSeek web options: DeepThink / web-search toggles, saved live.
   const dsOpts = p.protocol === 'deepseek-web' ? `
     <h4 class="sub">DeepSeek options</h4>
@@ -1102,6 +1209,15 @@ async function showProviderDetail(id) {
       <label class="check"><input type="checkbox" id="pdDsSearch"${p.deepseek && p.deepseek.searchEnabled ? ' checked' : ''}> Web search <span class="hint">search on by default</span></label>
     </div>
     <div class="hint" id="pdDsMsg" style="margin-bottom:10px">Model names still win: <code>deepseek-reasoner</code> forces DeepThink, <code>*search*</code> forces web search.</div>`
+    : '';
+  // Z.ai web options: thinking / web-search toggles, saved live.
+  const zaiOpts = p.protocol === 'zai-web' ? `
+    <h4 class="sub">Z.ai options</h4>
+    <div class="row-btns" style="margin-bottom:6px">
+      <label class="check"><input type="checkbox" id="pdZaiThinking"${!p.zai || p.zai.thinkingEnabled !== false ? ' checked' : ''}> Thinking <span class="hint">reasoning on by default</span></label>
+      <label class="check"><input type="checkbox" id="pdZaiSearch"${p.zai && p.zai.searchEnabled ? ' checked' : ''}> Web search <span class="hint">search on by default</span></label>
+    </div>
+    <div class="hint" id="pdZaiMsg" style="margin-bottom:10px">Model names still win: <code>*think*</code> forces thinking, <code>*search*</code> forces web search.</div>`
     : '';
   el.innerHTML = `
     <button class="btn" id="pdBack">← All providers</button>
@@ -1115,6 +1231,7 @@ async function showProviderDetail(id) {
       </div></div>
     <div class="hint" style="margin-bottom:14px"><code>${esc(p.baseUrl || '')}</code></div>
     ${dsOpts}
+    ${zaiOpts}
     <div class="cards" id="pdStats"></div>
     <h4 class="sub">Models <span class="hint">shared by all ${esc(p.name)} accounts</span></h4>
     <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
@@ -1144,6 +1261,8 @@ async function showProviderDetail(id) {
   if (q) q.onclick = () => { $('#qwenConnectMsg').textContent = ''; $('#qwenConnectModal').hidden = false; };
   const dsc = $('#pdDsConnect');
   if (dsc) dsc.onclick = () => openDsConnect();
+  const zaic = $('#pdZaiConnect');
+  if (zaic) zaic.onclick = () => { $('#zaiConnectMsg').textContent = ''; $('#zaiConnectForm').reset(); $('#zaiConnectModal').hidden = false; };
   const o = $('#pdOConnect');
   if (o) o.onclick = () => openConnect();
   // DeepSeek DeepThink / web-search toggles — saved live to the provider.
@@ -1165,6 +1284,25 @@ async function showProviderDetail(id) {
   };
   if (dsT) dsT.onchange = saveDsOpts;
   if (dsS) dsS.onchange = saveDsOpts;
+  // Z.ai thinking / web-search toggles — saved live to the provider.
+  const zaiT = $('#pdZaiThinking'), zaiS = $('#pdZaiSearch');
+  const saveZaiOpts = async () => {
+    if (!zaiT || !zaiS) return;
+    const msg = $('#pdZaiMsg');
+    const zai = { ...(p.zai || {}), thinkingEnabled: zaiT.checked, searchEnabled: zaiS.checked };
+    const r = await api('/api/providers/' + encodeURIComponent(p.id), {
+      method: 'PUT', body: JSON.stringify({ ...p, zai }),
+    });
+    if (r.ok) {
+      p.zai = zai;
+      await loadUpProviders();
+      if (msg) msg.textContent = '✓ saved';
+    } else if (msg) {
+      msg.textContent = '✕ save failed';
+    }
+  };
+  if (zaiT) zaiT.onchange = saveZaiOpts;
+  if (zaiS) zaiS.onchange = saveZaiOpts;
   el.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
