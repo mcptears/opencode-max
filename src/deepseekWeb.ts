@@ -294,13 +294,16 @@ async function dsFetch(baseUrl: string, path: string, init: RequestInit, opts: F
   } as RequestInit & { dispatcher?: unknown });
 }
 
-function bizData(j: unknown): { code?: unknown; biz_code?: unknown; biz_data?: unknown } | null {
+function bizData(j: unknown): { code?: unknown; biz_code?: unknown; biz_msg?: unknown; biz_data?: unknown } | null {
   if (!j || typeof j !== 'object') return null;
   const o = j as { data?: unknown };
-  return o.data && typeof o.data === 'object' ? (o.data as { code?: unknown; biz_code?: unknown; biz_data?: unknown }) : null;
+  return o.data && typeof o.data === 'object' ? (o.data as { code?: unknown; biz_code?: unknown; biz_msg?: unknown; biz_data?: unknown }) : null;
 }
 
-export type DeepSeekLoginResult = { ok: true; credential: string } | { ok: false; error: string };
+export type DeepSeekLoginResult =
+  | { ok: true; credential: string }
+  | { ok: false; error: string; needCode?: false }
+  | { ok: false; needCode: true; message: string };
 
 function loginError(status: number, bodyText: string): string {
   if (status === 400 || status === 401 || status === 403) return 'email or password incorrect';
@@ -309,11 +312,22 @@ function loginError(status: number, bodyText: string): string {
   return `deepseek sign-in failed (${status})${t ? `: ${t}` : ''}`;
 }
 
+/** DeepSeek's risk control sometimes answers a password login with an email
+ * verification challenge instead of a token. Match its wording loosely. */
+function looksLikeVerificationChallenge(msg: string): boolean {
+  return /verif|2fa|mfa|one-?time|otp|security.?code|check.?your.?email/i.test(msg);
+}
+
 /**
  * Sign in with a DeepSeek account — the same call the chat.deepseek.com web
  * frontend makes. `passwordHash` must be the SHA-256 hex of the password, so
  * the plaintext password never reaches this server. Only the session token is
  * returned; nothing is persisted here.
+ *
+ * DeepSeek's risk control sometimes answers with an email verification
+ * challenge instead of a token (the user gets a code by email). In that case
+ * the result is `{ok:false, needCode:true}` — the caller should prompt for
+ * the code and call again with `opts.verificationCode`.
  *
  * Note: every login invalidates the previous token for the account, so
  * reconnects are serialized by the caller.
@@ -322,25 +336,31 @@ export async function deepseekSignIn(
   baseUrl: string,
   email: string,
   passwordHash: string,
-  opts: FetchOpts = {},
+  opts: FetchOpts & { verificationCode?: string } = {},
 ): Promise<DeepSeekLoginResult> {
+  const body: Record<string, string> = {
+    email,
+    mobile: '',
+    password: passwordHash,
+    area_code: '',
+    device_id: generateDeviceId(),
+    os: 'web',
+  };
+  const code = (opts.verificationCode ?? '').trim();
+  if (code) {
+    // Exact field name is undocumented; send the likely candidates — the
+    // server reads the one it knows and ignores the rest.
+    body.verification_code = code;
+    body.verify_code = code;
+    body.email_code = code;
+    body.code = code;
+  }
   let r: Response;
   try {
     r = await dsFetch(
       baseUrl,
       '/api/v0/users/login',
-      {
-        method: 'POST',
-        headers: baseHeaders(),
-        body: JSON.stringify({
-          email,
-          mobile: '',
-          password: passwordHash,
-          area_code: '',
-          device_id: generateDeviceId(),
-          os: 'web',
-        }),
-      },
+      { method: 'POST', headers: baseHeaders(), body: JSON.stringify(body) },
       opts,
     );
   } catch (e) {
@@ -358,8 +378,41 @@ export async function deepseekSignIn(
   const user = d?.biz_data && typeof d.biz_data === 'object' ? (d.biz_data as { user?: unknown }).user : null;
   const token = user && typeof user === 'object' ? (user as { token?: unknown }).token : null;
   if (typeof token === 'string' && token.trim()) return { ok: true, credential: token.trim() };
-  const msg = d?.biz_data && typeof d.biz_data === 'object' ? String((d.biz_data as { biz_msg?: unknown }).biz_msg ?? '') : '';
+  const msg = d && typeof d.biz_msg === 'string' ? d.biz_msg : '';
+  if (looksLikeVerificationChallenge(msg)) {
+    return {
+      ok: false,
+      needCode: true,
+      message: msg || 'DeepSeek sent a verification code to your email — enter it to finish signing in.',
+    };
+  }
   return { ok: false, error: msg ? `deepseek sign-in failed: ${msg}` : 'sign-in succeeded but DeepSeek returned no token' };
+}
+
+/**
+ * Best-effort resend of the login verification code. DeepSeek usually emails
+ * the code automatically when the login is challenged; this is for when it
+ * didn't arrive. The exact `scenario` value is undocumented — "login" is the
+ * natural counterpart to the documented "register".
+ */
+export async function resendDeepSeekCode(
+  baseUrl: string,
+  email: string,
+  opts: FetchOpts = {},
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let r: Response;
+  try {
+    r = await dsFetch(
+      baseUrl,
+      '/api/v0/users/create_email_verification_code',
+      { method: 'POST', headers: baseHeaders(), body: JSON.stringify({ email, scenario: 'login' }) },
+      opts,
+    );
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'network error' };
+  }
+  if (!r.ok) return { ok: false, error: `could not resend the code (${r.status}) — check your email anyway` };
+  return { ok: true };
 }
 
 /**
