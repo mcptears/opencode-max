@@ -251,7 +251,12 @@ export class IpRotator {
   }
 
   async checkAll(target = 'https://opencode.ai/zen/v1/models'): Promise<void> {
-    await Promise.allSettled(this.proxies.map((p) => this.checkOne(p, target)));
+    await this.checkProxies(this.proxies, target);
+  }
+
+  /** Probe a subset of proxies on demand (dashboard "Check health"). */
+  async checkProxies(proxies: string[], target = 'https://opencode.ai/zen/v1/models'): Promise<void> {
+    await Promise.allSettled(proxies.map((p) => this.checkOne(p, target)));
   }
 
   private async checkOne(proxy: string, target: string): Promise<void> {
