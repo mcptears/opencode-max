@@ -172,6 +172,24 @@
         </div>
       </div>
 
+      <div class="modal-backdrop" id="zaiConnectModal" hidden>
+        <div class="modal">
+          <div class="modal-head"><h3>Connect Z.ai account</h3><button class="btn" id="zaiConnectClose">✕</button></div>
+          <ol class="steps">
+            <li><strong>Sign in</strong> at <a href="https://chat.z.ai" target="_blank" rel="noopener">chat.z.ai</a> in your browser — solve the captcha there (one time).</li>
+            <li><strong>Copy your token:</strong> open DevTools (F12) → Application → Local Storage → <code>https://chat.z.ai</code> → copy the <code>token</code> value.</li>
+            <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
+          </ol>
+          <form id="zaiConnectForm" class="form-grid">
+            <label>Display name<input name="name" placeholder="e.g. Z.ai main"></label>
+            <label>Z.ai token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+            <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+            <button class="btn primary" type="submit">Validate &amp; connect</button>
+          </form>
+          <div id="zaiConnectMsg" class="hint"></div>
+        </div>
+      </div>
+
       <div class="modal-backdrop" id="connectModal" hidden>
         <div class="modal">
           <div class="modal-head"><h3>Connect OpenCode account</h3><button class="btn" id="connectClose">✕</button></div>
@@ -220,6 +238,7 @@
                 <option value="openai">OpenAI-compatible</option>
                 <option value="qwen-web">Qwen web (built-in)</option>
                 <option value="deepseek-web">DeepSeek web (built-in)</option>
+                <option value="zai-web">Z.ai web (built-in)</option>
               </select>
             </label>
             <div id="qwenOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
@@ -232,6 +251,14 @@
               <div class="row-btns">
                 <label class="check"><input type="checkbox" name="dsThinking"> DeepThink <span class="hint">reasoning on by default</span></label>
                 <label class="check"><input type="checkbox" name="dsSearch"> Web search <span class="hint">search on by default</span></label>
+              </div>
+            </div>
+            <div id="zaiOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+              <input name="zaiDefaultModel" placeholder="Z.ai web model id · e.g. glm-5">
+              <textarea name="zaiModelMap" rows="2" placeholder='model map JSON · e.g. {"glm-fast": "glm-5-flash"}' spellcheck="false"></textarea>
+              <div class="row-btns">
+                <label class="check"><input type="checkbox" name="zaiThinking" checked> Thinking <span class="hint">reasoning on by default</span></label>
+                <label class="check"><input type="checkbox" name="zaiSearch"> Web search <span class="hint">search on by default</span></label>
               </div>
             </div>
             <button class="btn primary" type="submit">Add provider</button>
@@ -247,6 +274,12 @@
           <div class="connect-row">
             <button class="btn primary" id="dsPresetBtn">Add DeepSeek provider</button>
             <button class="btn" id="dsConnectBtn">Connect DeepSeek account</button>
+          </div>
+          <h4 class="sub">Z.ai (built-in) <span class="hint">free GLM chat — no separate deployment</span></h4>
+          <p class="hint">Z.ai runs natively inside opencode-max. Add the provider, then connect your Z.ai account — sign in at <code>chat.z.ai</code> in your browser (solve the captcha there once), then paste the token from DevTools → Application → Local Storage → <code>token</code>.</p>
+          <div class="connect-row">
+            <button class="btn primary" id="zaiPresetBtn">Add Z.ai provider</button>
+            <button class="btn" id="zaiConnectBtn">Connect Z.ai account</button>
           </div>
           <div id="providerMsg" class="hint"></div>
         </div>
