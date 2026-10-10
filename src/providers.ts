@@ -10,6 +10,17 @@ export interface QwenWebOptions {
   modelMap?: Record<string, string>;
 }
 
+export interface DeepSeekWebOptions {
+  /** Default DeepSeek web model id when the request model has no mapping. */
+  defaultModel: string;
+  /** opencode-max model name -> DeepSeek web model id. */
+  modelMap?: Record<string, string>;
+  /** Default DeepThink (reasoning) for requests without an explicit model marker. */
+  thinkingEnabled?: boolean;
+  /** Default web search for requests without an explicit model marker. */
+  searchEnabled?: boolean;
+}
+
 export interface ProviderConfig {
   /** Stable id, e.g. "opencode-zen". Accounts reference it via their `provider` field. */
   id: string;
@@ -22,14 +33,34 @@ export interface ProviderConfig {
   /**
    * Upstream protocol. `openai` (default) forwards OpenAI-format requests
    * untouched; `qwen-web` speaks Qwen's private web API natively inside
-   * opencode-max — no separate qwen2api deployment needed.
+   * opencode-max; `deepseek-web` does the same for DeepSeek's.
    */
-  protocol?: 'openai' | 'qwen-web';
+  protocol?: 'openai' | 'qwen-web' | 'deepseek-web';
   /** Qwen web options (only used when protocol is 'qwen-web'). */
   qwen?: QwenWebOptions;
+  /** DeepSeek web options (only used when protocol is 'deepseek-web'). */
+  deepseek?: DeepSeekWebOptions;
 }
 
 export const PROVIDERS_FILE = path.join(projectRoot(), 'providers.json');
+
+/** One-click preset: native DeepSeek web provider (built into opencode-max). */
+export const DEEPSEEK_PRESET: ProviderConfig = {
+  id: 'deepseek',
+  name: 'DeepSeek (built-in)',
+  baseUrl: 'https://chat.deepseek.com',
+  models: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-expert'],
+  enabled: true,
+  protocol: 'deepseek-web',
+  deepseek: {
+    defaultModel: 'deepseek-chat',
+    modelMap: {
+      'deepseek-r1': 'deepseek-reasoner',
+      'deepseek-think': 'deepseek-reasoner',
+      'deepseek-pro': 'deepseek-expert',
+    },
+  },
+};
 
 /** One-click preset: native Qwen web provider (built into opencode-max). */
 export const QWEN_PRESET: ProviderConfig = {
@@ -75,7 +106,7 @@ function normalize(p: unknown): ProviderConfig | null {
   const models = Array.isArray(r.models)
     ? (r.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
     : [];
-  const protocol = r.protocol === 'qwen-web' ? 'qwen-web' : 'openai';
+  const protocol = r.protocol === 'qwen-web' || r.protocol === 'deepseek-web' ? r.protocol : 'openai';
   let qwen: QwenWebOptions | undefined;
   if (protocol === 'qwen-web' && r.qwen && typeof r.qwen === 'object') {
     const q = r.qwen as Record<string, unknown>;
@@ -90,6 +121,22 @@ function normalize(p: unknown): ProviderConfig | null {
       ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
     };
   }
+  let deepseek: DeepSeekWebOptions | undefined;
+  if (protocol === 'deepseek-web' && r.deepseek && typeof r.deepseek === 'object') {
+    const q = r.deepseek as Record<string, unknown>;
+    const modelMap: Record<string, string> = {};
+    if (q.modelMap && typeof q.modelMap === 'object') {
+      for (const [k, v] of Object.entries(q.modelMap as Record<string, unknown>)) {
+        if (typeof v === 'string' && v.trim()) modelMap[k] = v.trim();
+      }
+    }
+    deepseek = {
+      defaultModel: typeof q.defaultModel === 'string' && q.defaultModel.trim() ? q.defaultModel.trim() : 'deepseek-chat',
+      ...(Object.keys(modelMap).length > 0 ? { modelMap } : {}),
+      ...(typeof q.thinkingEnabled === 'boolean' ? { thinkingEnabled: q.thinkingEnabled } : {}),
+      ...(typeof q.searchEnabled === 'boolean' ? { searchEnabled: q.searchEnabled } : {}),
+    };
+  }
   return {
     id: r.id.trim(),
     name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : r.id.trim(),
@@ -97,6 +144,7 @@ function normalize(p: unknown): ProviderConfig | null {
     models: models.length > 0 ? models : ['*'],
     enabled: r.enabled !== false,
     ...(protocol === 'qwen-web' ? { protocol, qwen: qwen ?? { defaultModel: 'qwen3.7-plus' } } : {}),
+    ...(protocol === 'deepseek-web' ? { protocol, deepseek: deepseek ?? { defaultModel: 'deepseek-chat' } } : {}),
   };
 }
 
