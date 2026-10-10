@@ -188,21 +188,7 @@ function renderStatus(s) {
   renderProviderCards();
 
   $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
-  const health = window._health || [];
-  $('#proxyList').innerHTML = (window._proxies || []).length === 0
-    ? '<li>direct egress — no proxies configured</li>'
-    : window._proxies.map((p, i) => {
-        const h = health[i];
-        const badge = h ? (h.healthy ? '<span class="tag ok">healthy</span>' : '<span class="tag bad">down</span>') : '<span class="tag">checking…</span>';
-        const q = h && (h.qualityOk + h.qualityFail) > 0
-          ? `<span class="hint"> · ${h.qualityOk}/${h.qualityOk + h.qualityFail} ok${h.qualityLatencyMs ? ` · ${h.qualityLatencyMs}ms` : ''}</span>`
-          : '';
-        return `<li class="${p === s.ip.current ? 'current' : ''}"><span>${esc(p)}${p === s.ip.current ? '<span class="tag">active</span>' : ''}${badge}${q}</span><button class="btn danger" data-px="${esc(p)}">Remove</button></li>`;
-      }).join('');
-  document.querySelectorAll('#proxyList [data-px]').forEach((b) => b.onclick = async () => {
-    await api('/api/proxies?proxy=' + encodeURIComponent(b.dataset.px), { method: 'DELETE' });
-    loadProxies(); refresh();
-  });
+  renderProxyList(s);
 
   renderEvents();
   const port = location.port || '8080';
@@ -258,6 +244,74 @@ async function loadSettings() {
 }
 
 $('#btnRotate').onclick = async () => { await api('/v1/rotate', { method: 'POST' }); refresh(); };
+
+// ---- Proxy pool: selectable rows + manual health check ----
+const selectedProxies = new Set();
+
+function renderProxyList(s) {
+  const health = window._health || [];
+  const list = window._proxies || [];
+  $('#proxyList').innerHTML = list.length === 0
+    ? '<li>direct egress — no proxies configured</li>'
+    : list.map((p, i) => {
+        const h = health[i];
+        const badge = h ? (h.healthy ? '<span class="tag ok">healthy</span>' : '<span class="tag bad">down</span>') : '<span class="tag">checking…</span>';
+        const q = h && (h.qualityOk + h.qualityFail) > 0
+          ? `<span class="hint"> · ${h.qualityOk}/${h.qualityOk + h.qualityFail} ok${h.qualityLatencyMs ? ` · ${h.qualityLatencyMs}ms` : ''}</span>`
+          : '';
+        return `<li class="${p === s.ip.current ? 'current' : ''}">` +
+          `<label class="check"><input type="checkbox" data-pxcheck="${esc(p)}"${selectedProxies.has(p) ? ' checked' : ''}></label>` +
+          `<span>${esc(p)}${p === s.ip.current ? '<span class="tag">active</span>' : ''}${badge}${q}</span>` +
+          `<button class="btn danger" data-px="${esc(p)}">Remove</button></li>`;
+      }).join('');
+  document.querySelectorAll('#proxyList [data-px]').forEach((b) => b.onclick = async () => {
+    selectedProxies.delete(b.dataset.px);
+    await api('/api/proxies?proxy=' + encodeURIComponent(b.dataset.px), { method: 'DELETE' });
+    loadProxies(); refresh();
+  });
+  document.querySelectorAll('#proxyList [data-pxcheck]').forEach((c) => c.onchange = () => {
+    c.checked ? selectedProxies.add(c.dataset.pxcheck) : selectedProxies.delete(c.dataset.pxcheck);
+    syncSelectAll();
+  });
+  syncSelectAll();
+}
+
+function syncSelectAll() {
+  const all = $('#proxySelectAll');
+  if (!all) return;
+  const list = window._proxies || [];
+  all.checked = list.length > 0 && list.every((p) => selectedProxies.has(p));
+}
+
+$('#proxySelectAll').onchange = (e) => {
+  const list = window._proxies || [];
+  if (e.target.checked) list.forEach((p) => selectedProxies.add(p));
+  else selectedProxies.clear();
+  renderProxyList(window._lastStatus || { ip: {} });
+};
+
+$('#proxyCheckBtn').onclick = async () => {
+  const btn = $('#proxyCheckBtn'), status = $('#proxyCheckStatus');
+  const list = window._proxies || [];
+  const targets = list.filter((p) => selectedProxies.has(p));
+  btn.disabled = true;
+  status.textContent = `checking ${targets.length || list.length}…`;
+  try {
+    const r = await (await api('/api/proxies/check', {
+      method: 'POST', body: JSON.stringify({ proxies: targets }),
+    })).json();
+    const down = (r.health || []).filter((h, i) => {
+      const p = list[i];
+      return (targets.length === 0 || targets.includes(p)) && h && h.healthy === false;
+    }).length;
+    status.textContent = `✓ ${r.checked} checked${down ? ` · ${down} down` : ' · all healthy'}`;
+  } catch {
+    status.textContent = '✕ check failed';
+  }
+  btn.disabled = false;
+  setTimeout(() => { status.textContent = ''; }, 6000);
+  await loadProxies(); refresh();
+};
 
 // ---- backup / restore ----
 $('#btnBackupExport').onclick = async () => {
