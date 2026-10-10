@@ -670,6 +670,14 @@ $('#qwenConnectForm').onsubmit = async (e) => {
       method: 'POST', body: JSON.stringify({ credential }),
     })).json();
     if (!v.ok) { msg.textContent = '✕ ' + (v.error || 'token rejected'); return; }
+    // Make sure the Qwen provider exists (the sign-in tab does this server-side;
+    // the paste-token tab must do it here). 409 = already there, ignore it.
+    msg.textContent = 'Setting up Qwen provider…';
+    const preset = await api('/api/providers/preset/qwen', { method: 'POST' });
+    if (!preset.ok && preset.status !== 409) {
+      msg.textContent = '✕ could not add Qwen provider: ' + (await preset.text()).slice(0, 160);
+      return;
+    }
     const list = await (await api('/api/accounts')).json();
     const ids = new Set((list.accounts || []).map((a) => a.id));
     let n = 1;
