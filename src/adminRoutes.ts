@@ -289,6 +289,15 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       res.status(409).json({ error: { message: `account '${v.account.id}' already exists`, status: 409 } });
       return;
     }
+    // A Qwen account needs the native qwen provider to route anywhere.
+    // Auto-add the preset if the user connected before adding the provider
+    // (same guarantee the qwen-login endpoint already makes).
+    if (v.account.provider === QWEN_PRESET.id && !loadProviders().some((p) => p.id === QWEN_PRESET.id)) {
+      const providers = loadProviders();
+      providers.push({ ...QWEN_PRESET });
+      saveProviders(providers);
+      metrics.record('settings', 'native qwen provider preset added (auto, on account connect)');
+    }
     accounts.push(v.account);
     writeAccounts(accounts);
     pool.replace(accounts);
