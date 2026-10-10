@@ -169,7 +169,7 @@ DeepSeek runs **natively inside opencode-max** — it speaks `chat.deepseek.com`
 
 1. In the dashboard, hit **Add DeepSeek provider** (or `POST /api/providers/preset/deepseek`).
 2. Hit **Connect DeepSeek account** and pick a tab:
-   - **Sign in** — your DeepSeek email + password, the same login as `chat.deepseek.com`. The password is SHA-256 hashed in your browser and never stored; only the session token lands in the account pool. Note: each sign-in invalidates the previous session for that account.
+   - **Sign in** — your DeepSeek email + password, the same login as `chat.deepseek.com`. The password is SHA-256 hashed in your browser and never stored; only the session token lands in the account pool. Note: each sign-in invalidates the previous session for that account. If DeepSeek's risk control asks for an email verification code, the modal prompts for it (with a resend button) and completes the sign-in.
    - **Paste token** — sign in at `chat.deepseek.com`, run `JSON.parse(localStorage.getItem("userToken")).value` in DevTools, paste the token. It's validated live before anything is saved.
 3. Ask for a DeepSeek model — `deepseek-chat`, `deepseek-reasoner`, `deepseek-expert` — and it routes there, with the same proxy rotation, retries, quota tracking and session handling as Zen.
 
@@ -379,7 +379,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 223 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 229 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
