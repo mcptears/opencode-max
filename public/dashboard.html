@@ -131,6 +131,39 @@
         </div>
       </div>
 
+      <div class="modal-backdrop" id="dsConnectModal" hidden>
+        <div class="modal">
+          <div class="modal-head"><h3>Connect DeepSeek account</h3><button class="btn" id="dsConnectClose">✕</button></div>
+          <div style="display:flex;gap:8px;margin:4px 0 12px">
+            <button class="tab on" data-dstab="signin">Sign in</button>
+            <button class="tab" data-dstab="token">Paste token</button>
+          </div>
+          <div id="dstab-signin">
+            <p class="hint">Sign in with your DeepSeek account — the same login as <code>chat.deepseek.com</code>. Your password is SHA-256 hashed in the browser and never stored; only the session token is kept. Note: each sign-in invalidates the previous session for that account.</p>
+            <form id="dsSigninForm" class="form-grid">
+              <label>Email<input name="email" type="email" required placeholder="you@example.com" autocomplete="email"></label>
+              <label>Password<input name="password" type="password" required placeholder="DeepSeek password" autocomplete="current-password"></label>
+              <label>Display name<input name="name" placeholder="e.g. DeepSeek main"></label>
+              <button class="btn primary" type="submit">Sign in &amp; connect</button>
+            </form>
+          </div>
+          <div id="dstab-token" hidden>
+            <ol class="steps">
+              <li><strong>Sign in</strong> at <a href="https://chat.deepseek.com" target="_blank" rel="noopener">chat.deepseek.com</a> in your browser.</li>
+              <li><strong>Copy your token:</strong> open DevTools (F12) → Console → run <code>JSON.parse(localStorage.getItem("userToken")).value</code> and copy the value (no quotes).</li>
+              <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
+            </ol>
+            <form id="dsConnectForm" class="form-grid">
+              <label>Display name<input name="name" placeholder="e.g. DeepSeek main"></label>
+              <label>DeepSeek token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+              <button class="btn primary" type="submit">Validate &amp; connect</button>
+            </form>
+          </div>
+          <div id="dsConnectMsg" class="hint"></div>
+        </div>
+      </div>
+
       <div class="modal-backdrop" id="connectModal" hidden>
         <div class="modal">
           <div class="modal-head"><h3>Connect OpenCode account</h3><button class="btn" id="connectClose">✕</button></div>
@@ -178,11 +211,20 @@
               <select name="protocol" id="providerProtocol">
                 <option value="openai">OpenAI-compatible</option>
                 <option value="qwen-web">Qwen web (built-in)</option>
+                <option value="deepseek-web">DeepSeek web (built-in)</option>
               </select>
             </label>
             <div id="qwenOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
               <input name="qwenDefaultModel" placeholder="Qwen web model id · e.g. qwen3.7-plus">
               <textarea name="qwenModelMap" rows="2" placeholder='model map JSON · e.g. {"qwen-max": "qwen3.7-max"}' spellcheck="false"></textarea>
+            </div>
+            <div id="dsOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+              <input name="dsDefaultModel" placeholder="DeepSeek web model id · e.g. deepseek-chat">
+              <textarea name="dsModelMap" rows="2" placeholder='model map JSON · e.g. {"ds-r1": "deepseek-reasoner"}' spellcheck="false"></textarea>
+              <div class="row-btns">
+                <label class="check"><input type="checkbox" name="dsThinking"> DeepThink <span class="hint">reasoning on by default</span></label>
+                <label class="check"><input type="checkbox" name="dsSearch"> Web search <span class="hint">search on by default</span></label>
+              </div>
             </div>
             <button class="btn primary" type="submit">Add provider</button>
           </form>
@@ -191,6 +233,12 @@
           <div class="connect-row">
             <button class="btn primary" id="qwenPresetBtn">Add Qwen provider</button>
             <button class="btn" id="qwenConnectBtn">Connect Qwen account</button>
+          </div>
+          <h4 class="sub">DeepSeek (built-in) <span class="hint">free DeepSeek chat — no separate deployment</span></h4>
+          <p class="hint">DeepSeek runs natively inside opencode-max. Add the provider, then connect your DeepSeek account — sign in with email + password, or paste the token from <code>chat.deepseek.com</code> (DevTools console: <code>JSON.parse(localStorage.getItem("userToken")).value</code>).</p>
+          <div class="connect-row">
+            <button class="btn primary" id="dsPresetBtn">Add DeepSeek provider</button>
+            <button class="btn" id="dsConnectBtn">Connect DeepSeek account</button>
           </div>
           <div id="providerMsg" class="hint"></div>
         </div>
