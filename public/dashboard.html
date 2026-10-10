@@ -146,6 +146,14 @@
               <label>Display name<input name="name" placeholder="e.g. DeepSeek main"></label>
               <button class="btn primary" type="submit">Sign in &amp; connect</button>
             </form>
+            <form id="dsVerifyForm" class="form-grid" hidden>
+              <p class="hint" id="dsVerifyHint">DeepSeek sent a verification code to your email — enter it to finish signing in.</p>
+              <label>Verification code<input name="code" inputmode="numeric" autocomplete="one-time-code" required placeholder="6-digit code"></label>
+              <div style="display:flex;gap:8px">
+                <button class="btn primary" type="submit">Verify &amp; connect</button>
+                <button class="btn" type="button" id="dsResendCode">Resend code</button>
+              </div>
+            </form>
           </div>
           <div id="dstab-token" hidden>
             <ol class="steps">
