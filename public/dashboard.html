@@ -64,12 +64,7 @@
       <section id="sec-accounts" class="sec">
         <div class="panel">
           <div class="panel-head"><h3>Accounts</h3><span class="hint">API keys are stored locally and never displayed</span></div>
-          <table class="tbl" id="accountsTbl"><thead><tr><th>ID</th><th>Name</th><th>Provider</th><th>Priority</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead><tbody></tbody></table>
-          <h4 class="sub">Add account</h4>
-          <div class="connect-row">
-            <button class="btn primary" id="connectBtn">Connect OpenCode account</button>
-            <span class="hint">no JSON editing — get a link, sign in anywhere, paste the key</span>
-          </div>
+          <div id="providerCards" class="pcards"></div>
           <h4 class="sub">Add manually <span class="hint">for other providers / API tokens</span></h4>
           <form id="accountForm" class="form-grid">
             <input name="name" placeholder="display name" required>
