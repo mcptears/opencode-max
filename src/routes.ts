@@ -107,6 +107,18 @@ export async function aggregateModels(
       }
       continue;
     }
+    // zai-web likewise — synthesize from its config.
+    if (p.protocol === 'zai-web') {
+      const zai = p.zai ?? { defaultModel: 'glm-5' };
+      const ids = [...Object.keys(zai.modelMap ?? {}), zai.defaultModel];
+      for (const id of ids) {
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          data.push({ id, object: 'model', owned_by: 'zai' });
+        }
+      }
+      continue;
+    }
     const account = pool.acquire(p.id);
     try {
       const controller = new AbortController();
