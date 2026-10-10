@@ -175,6 +175,19 @@ DeepSeek runs **natively inside opencode-max** — it speaks `chat.deepseek.com`
 
 The provider page has **DeepThink** and **Web search** toggles — they set the default for all requests to that provider, while explicit model names still win (`deepseek-reasoner` forces DeepThink, `*search*` forces web search). Reasoning streams back as `reasoning_content`. Each request runs in a disposable upstream session (created, PoW-solved, used, deleted).
 
+### Z.ai (built-in, no separate deployment)
+
+Z.ai runs **natively inside opencode-max** — it speaks `chat.z.ai`'s web API directly, including its HMAC request signing (solved locally, no browser needed at runtime):
+
+1. In the dashboard, hit **Add Z.ai provider** (or `POST /api/providers/preset/zai`).
+2. Hit **Connect Z.ai account**:
+   - Sign in at `chat.z.ai` in your own browser — solve the captcha there (one time).
+   - Copy the token: DevTools (F12) → Application → Local Storage → `https://chat.z.ai` → `token`.
+   - Paste it in the dashboard — it's validated live before anything is saved. No password is ever involved.
+3. Ask for a GLM model — `glm-5`, `glm-4.7`, `glm-4.5`, … — and it routes there, with the same proxy rotation, retries, quota tracking and session handling as Zen.
+
+The provider page has **Thinking** and **Web search** toggles — they set the default for all requests to that provider, while explicit model names still win. Thinking streams back as `reasoning_content` (Z.ai wraps it in `<details>` tags; opencode-max splits it out).
+
 ### Cross-provider failover
 
 When a provider's accounts are all exhausted (or its upstream is down), the request automatically spills over to the next eligible provider instead of returning 503 — a provider is eligible if its model patterns match the request or it's a catch-all. Failovers are counted on the Overview dashboard and logged in the event feed.
@@ -379,7 +392,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 229 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 251 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
