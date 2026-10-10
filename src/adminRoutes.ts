@@ -9,7 +9,7 @@ import { getSettings, saveSettings, settingsFilePath, parseModelFallbacks, parse
 import { reinitFileLogger } from './logger.js';
 import { renderPrometheus } from './prometheus.js';
 import { validateQwenCredential, qwenSignIn } from './qwenWeb.js';
-import { validateDeepSeekCredential, deepseekSignIn } from './deepseekWeb.js';
+import { validateDeepSeekCredential, deepseekSignIn, resendDeepSeekCode } from './deepseekWeb.js';
 import { readAccounts, readProxies, writeAccounts, writeProxies } from './store.js';
 import { createHash } from 'node:crypto';
 import { loadProviders as loadScraperProviders, saveProviders as saveScraperProviders, testProxy, type ProviderFormat } from './scraper.js';
@@ -243,7 +243,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
    * the most recent session per account stays valid.
    */
   router.post('/api/accounts/deepseek-login', async (req, res) => {
-    const body = jsonBody(req) as { email?: unknown; passwordHash?: unknown; password?: unknown; name?: unknown; priority?: unknown };
+    const body = jsonBody(req) as { email?: unknown; passwordHash?: unknown; password?: unknown; name?: unknown; priority?: unknown; verificationCode?: unknown };
     const email = typeof body.email === 'string' ? body.email.trim() : '';
     let passwordHash = typeof body.passwordHash === 'string' ? body.passwordHash.trim() : '';
     if (!passwordHash && typeof body.password === 'string' && body.password) {
@@ -257,6 +257,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       res.status(400).json({ ok: false, error: 'password is required' });
       return;
     }
+    const verificationCode = typeof body.verificationCode === 'string' ? body.verificationCode.trim() : '';
     // Make sure the native DeepSeek provider exists so the account has a home.
     const providers = loadProviders();
     let dsProvider = providers.find((p) => p.protocol === 'deepseek-web');
@@ -266,7 +267,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       dsProvider = providers[providers.length - 1];
       metrics.record('settings', 'native deepseek provider preset added (via DeepSeek sign-in)');
     }
-    const login = await deepseekSignIn(dsProvider.baseUrl, email, passwordHash);
+    const login = await deepseekSignIn(dsProvider.baseUrl, email, passwordHash, verificationCode ? { verificationCode } : {});
     if (!login.ok) {
       res.json(login);
       return;
@@ -282,6 +283,20 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     pool.replace(accounts);
     metrics.record('account_added', `deepseek account '${account.id}' connected via sign-in`);
     res.status(201).json({ ok: true, id: account.id });
+  });
+
+  /** Resend the DeepSeek login verification code (best-effort). */
+  router.post('/api/accounts/deepseek-resend-code', async (req, res) => {
+    const body = jsonBody(req) as { email?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ ok: false, error: 'a valid email is required' });
+      return;
+    }
+    const providers = loadProviders();
+    const dsProvider = providers.find((p) => p.protocol === 'deepseek-web');
+    const baseUrl = dsProvider ? dsProvider.baseUrl : DEEPSEEK_PRESET.baseUrl;
+    res.json(await resendDeepSeekCode(baseUrl, email));
   });
 
   /** Check an API key against upstream without adding it (Connect flow).
