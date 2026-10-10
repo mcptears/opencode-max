@@ -549,6 +549,19 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ results });
   });
 
+  /** Manually probe proxy health. Body { proxies?: string[] } — omitted/empty = all. */
+  router.post('/api/proxies/check', async (req, res) => {
+    const body = jsonBody(req) as { proxies?: unknown };
+    const all = readProxies();
+    const hasSelection = Array.isArray(body?.proxies) && (body.proxies as unknown[]).length > 0;
+    const list = hasSelection
+      ? (body.proxies as unknown[]).filter((p): p is string => typeof p === 'string' && all.includes(p))
+      : all;
+    await rotator.checkProxies(list);
+    metrics.record('settings', `manual proxy health check: ${list.length} checked`);
+    res.json({ ok: true, checked: list.length, health: rotator.status().health });
+  });
+
   // ---- proxy scraper ----
   router.get('/api/scraper/providers', (_req, res) => {
     res.json({ providers: loadScraperProviders() });
