@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { createHash } from 'node:crypto';
-import { deepseekSignIn } from '../deepseekWeb.js';
+import { deepseekSignIn, resendDeepSeekCode } from '../deepseekWeb.js';
 import { buildAdminRouter } from '../adminRoutes.js';
 import { projectRoot } from '../paths.js';
 import { AccountPool } from '../accountPool.js';
@@ -19,8 +19,9 @@ import { saveSettings } from '../settings.js';
 /** Mock chat.deepseek.com auth + session endpoints. */
 let mock: http.Server | null = null;
 let mockBase = '';
-let loginMode: 'ok' | 'bad-creds' = 'ok';
+let loginMode: 'ok' | 'bad-creds' | 'verify' = 'ok';
 let lastLoginBody: unknown = null;
+let lastResendBody: unknown = null;
 let sessionMode: 'ok' | 'dead' = 'ok';
 
 beforeAll(async () => {
@@ -38,7 +39,21 @@ beforeAll(async () => {
           json({ code: 400, msg: 'invalid', data: { biz_code: 400, biz_msg: 'email or password incorrect', biz_data: {} } }, 401);
           return;
         }
+        if (loginMode === 'verify') {
+          const b = lastLoginBody as { verification_code?: string };
+          if (b.verification_code === '123456') {
+            json({ code: 0, msg: '', data: { biz_code: 0, biz_msg: '', biz_data: { user: { token: 'ds-token-123', email: 'u***@example.com' } } } });
+            return;
+          }
+          json({ code: 0, msg: '', data: { biz_code: 1001, biz_msg: 'please verify your email — a verification code was sent', biz_data: {} } });
+          return;
+        }
         json({ code: 0, msg: '', data: { biz_code: 0, biz_msg: '', biz_data: { user: { token: 'ds-token-123', email: 'u***@example.com' } } } });
+        return;
+      }
+      if (url === '/api/v0/users/create_email_verification_code' && req.method === 'POST') {
+        lastResendBody = JSON.parse(body);
+        json({ code: 0, msg: '', data: { biz_code: 0, biz_msg: '', biz_data: {} } });
         return;
       }
       if (url === '/api/v0/chat_session/create' && req.method === 'POST') {
@@ -82,6 +97,31 @@ describe('deepseekSignIn', () => {
     const r = await deepseekSignIn(mockBase, 'u@example.com', '0'.repeat(64));
     expect(r).toEqual({ ok: false, error: 'email or password incorrect' });
     loginMode = 'ok';
+  });
+
+  it('returns needCode when DeepSeek asks for email verification', async () => {
+    loginMode = 'verify';
+    const r = await deepseekSignIn(mockBase, 'u@example.com', '0'.repeat(64));
+    expect(r.ok).toBe(false);
+    expect((r as { needCode?: boolean }).needCode).toBe(true);
+    loginMode = 'ok';
+  });
+
+  it('completes the login when the verification code is supplied', async () => {
+    loginMode = 'verify';
+    const r = await deepseekSignIn(mockBase, 'u@example.com', '0'.repeat(64), { verificationCode: '123456' });
+    expect(r).toEqual({ ok: true, credential: 'ds-token-123' });
+    const sent = lastLoginBody as { verification_code?: string; verify_code?: string; code?: string };
+    expect(sent.verification_code).toBe('123456');
+    loginMode = 'ok';
+  });
+
+  it('resends the verification code', async () => {
+    const r = await resendDeepSeekCode(mockBase, 'u@example.com');
+    expect(r).toEqual({ ok: true });
+    const sent = lastResendBody as { email?: string; scenario?: string };
+    expect(sent.email).toBe('u@example.com');
+    expect(sent.scenario).toBe('login');
   });
 });
 
@@ -209,6 +249,44 @@ describe('DeepSeek admin endpoints', () => {
     const providers = JSON.parse(fs.readFileSync(providersFile, 'utf8')) as { providers: { id: string; protocol: string }[] };
     const ds = providers.providers.find((p) => p.id === 'deepseek');
     expect(ds?.protocol).toBe('deepseek-web');
+  });
+
+  it('passes the verification challenge through to the dashboard', async () => {
+    await ensureMockProvider();
+    loginMode = 'verify';
+    const r = await fetch(`${base}/api/accounts/deepseek-login`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'user@example.com', passwordHash: '0'.repeat(64) }),
+    });
+    const j = (await r.json()) as { ok: boolean; needCode?: boolean; message?: string };
+    expect(j.ok).toBe(false);
+    expect(j.needCode).toBe(true);
+    expect(typeof j.message).toBe('string');
+    loginMode = 'ok';
+  });
+
+  it('creates the account when the verification code is supplied', async () => {
+    await ensureMockProvider();
+    loginMode = 'verify';
+    const r = await fetch(`${base}/api/accounts/deepseek-login`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'user@example.com', passwordHash: '0'.repeat(64), verificationCode: '123456' }),
+    });
+    expect(r.status).toBe(201);
+    const j = (await r.json()) as { ok: boolean; id: string };
+    expect(j.ok).toBe(true);
+    loginMode = 'ok';
+  });
+
+  it('resend-code endpoint reaches DeepSeek', async () => {
+    await ensureMockProvider();
+    const r = await fetch(`${base}/api/accounts/deepseek-resend-code`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'user@example.com' }),
+    });
+    const j = (await r.json()) as { ok: boolean };
+    expect(j.ok).toBe(true);
+    expect((lastResendBody as { email?: string }).email).toBe('user@example.com');
   });
 
   it('preset endpoint adds the provider, 409 when present', async () => {
