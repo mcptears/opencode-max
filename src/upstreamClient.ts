@@ -58,6 +58,7 @@ import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
 import type { Alerter } from './alerts.js';
 import { qwenChatCompletion, resolveQwenModel, QwenWebError } from './qwenWeb.js';
+import { deepseekChatCompletion, resolveDeepSeekModel, resolveDeepSeekModelName, DeepSeekWebError } from './deepseekWeb.js';
 
 /** Rewrite the model name inside a JSON request body (for model fallbacks). */
 function rewriteModel(bodyText: string | undefined, model: string | undefined): string | undefined {
@@ -351,11 +352,11 @@ export class UpstreamClient {
   }
 
   /**
-   * Execute the upstream fetch. Providers with protocol 'qwen-web' are served
-   * by the native Qwen web client (built into opencode-max); everything else
-   * is a plain OpenAI-compatible passthrough. Qwen protocol errors are
-   * converted to Responses so the standard dead-key / 429 / retry machinery
-   * below applies unchanged.
+   * Execute the upstream fetch. Providers with protocol 'qwen-web' /
+   * 'deepseek-web' are served by the native web clients (built into
+   * opencode-max); everything else is a plain OpenAI-compatible passthrough.
+   * Protocol errors are converted to Responses so the standard dead-key /
+   * 429 / retry machinery below applies unchanged.
    */
   private async fetchUpstream(
     req: ForwardRequest,
@@ -371,6 +372,9 @@ export class UpstreamClient {
     const provider = this.getProviders().find((p) => p.id === providerId);
     if (provider?.protocol === 'qwen-web') {
       return this.fetchQwenWeb(req, provider, account, model, proxy, signal, body);
+    }
+    if (provider?.protocol === 'deepseek-web') {
+      return this.fetchDeepSeekWeb(req, provider, account, model, proxy, signal, body);
     }
     return fetch(url, {
       method: req.method,
@@ -428,6 +432,60 @@ export class UpstreamClient {
       });
     } catch (e) {
       if (e instanceof QwenWebError) return qwenError(e.status, e.message);
+      throw e; // network-level: retry with backoff like any other provider
+    }
+  }
+
+  private async fetchDeepSeekWeb(
+    req: ForwardRequest,
+    provider: ProviderConfig,
+    account: AccountConfig,
+    model: string | undefined,
+    proxy: string | null,
+    signal: AbortSignal,
+    body: string | undefined,
+  ): Promise<Response> {
+    const dsError = (status: number, message: string): Response =>
+      new Response(JSON.stringify({ error: { message, type: 'deepseek_web_error' } }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+    if (req.method !== 'POST' || req.path !== '/chat/completions') {
+      return dsError(404, 'deepseek-web provider only serves POST /chat/completions');
+    }
+    if (!account.apiKey) {
+      return dsError(503, `no DeepSeek account configured on '${provider.id}' — connect one from the dashboard`);
+    }
+    let parsed: { model?: string; messages?: { role?: string; content?: unknown }[]; stream?: boolean };
+    try {
+      parsed = JSON.parse(body ?? '');
+    } catch {
+      return dsError(400, 'request body must be JSON');
+    }
+    const dsOpts = provider.deepseek ?? { defaultModel: 'deepseek-chat' };
+    const requested = parsed.model ?? model;
+    const dsModel = resolveDeepSeekModelName(dsOpts.modelMap, dsOpts.defaultModel, requested);
+    const web = resolveDeepSeekModel(dsOpts.modelMap, dsOpts.defaultModel, requested, dsOpts);
+    const base = this.resolveBaseUrl(account);
+    try {
+      const stream = await deepseekChatCompletion({
+        baseUrl: base,
+        credential: account.apiKey,
+        model: dsModel,
+        messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+        stream: parsed.stream !== false,
+        responseModel: requested,
+        web,
+        signal,
+        dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
+      });
+      // Report the *requested* model name so clients see what they asked for.
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': parsed.stream !== false ? 'text/event-stream' : 'application/json' },
+      });
+    } catch (e) {
+      if (e instanceof DeepSeekWebError) return dsError(e.status, e.message);
       throw e; // network-level: retry with backoff like any other provider
     }
   }
