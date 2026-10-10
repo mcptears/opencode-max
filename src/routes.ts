@@ -95,6 +95,18 @@ export async function aggregateModels(
       }
       continue;
     }
+    // deepseek-web likewise — synthesize from its config.
+    if (p.protocol === 'deepseek-web') {
+      const ds = p.deepseek ?? { defaultModel: 'deepseek-chat' };
+      const ids = [...Object.keys(ds.modelMap ?? {}), ds.defaultModel];
+      for (const id of ids) {
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          data.push({ id, object: 'model', owned_by: 'deepseek' });
+        }
+      }
+      continue;
+    }
     const account = pool.acquire(p.id);
     try {
       const controller = new AbortController();
