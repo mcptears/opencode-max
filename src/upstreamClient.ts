@@ -56,6 +56,7 @@ import { compressToolResults } from './tokenSaver.js';
 import { trackUsage } from './usage.js';
 import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
+import { zaiChatCompletion, ZaiWebError } from './zaiWeb.js';
 import type { Alerter } from './alerts.js';
 import { qwenChatCompletion, resolveQwenModel, QwenWebError } from './qwenWeb.js';
 import { deepseekChatCompletion, resolveDeepSeekModel, resolveDeepSeekModelName, DeepSeekWebError } from './deepseekWeb.js';
@@ -376,6 +377,9 @@ export class UpstreamClient {
     if (provider?.protocol === 'deepseek-web') {
       return this.fetchDeepSeekWeb(req, provider, account, model, proxy, signal, body);
     }
+    if (provider?.protocol === 'zai-web') {
+      return this.fetchZaiWeb(req, provider, account, model, proxy, signal, body);
+    }
     return fetch(url, {
       method: req.method,
       headers,
@@ -486,6 +490,63 @@ export class UpstreamClient {
       });
     } catch (e) {
       if (e instanceof DeepSeekWebError) return dsError(e.status, e.message);
+      throw e; // network-level: retry with backoff like any other provider
+    }
+  }
+
+  private async fetchZaiWeb(
+    req: ForwardRequest,
+    provider: ProviderConfig,
+    account: AccountConfig,
+    model: string | undefined,
+    proxy: string | null,
+    signal: AbortSignal,
+    body: string | undefined,
+  ): Promise<Response> {
+    const zaiError = (status: number, message: string): Response =>
+      new Response(JSON.stringify({ error: { message, type: 'zai_web_error' } }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+    if (req.method !== 'POST' || req.path !== '/chat/completions') {
+      return zaiError(404, 'zai-web provider only serves POST /chat/completions');
+    }
+    if (!account.apiKey) {
+      return zaiError(503, `no Z.ai account configured on '${provider.id}' — connect one from the dashboard`);
+    }
+    let parsed: { model?: string; messages?: { role?: string; content?: unknown }[]; stream?: boolean };
+    try {
+      parsed = JSON.parse(body ?? '');
+    } catch {
+      return zaiError(400, 'request body must be JSON');
+    }
+    const zaiOpts = provider.zai ?? { defaultModel: 'glm-5' };
+    const requested = parsed.model ?? model ?? zaiOpts.defaultModel;
+    const zaiModel = (zaiOpts.modelMap && zaiOpts.modelMap[requested]) || requested || zaiOpts.defaultModel;
+    // Explicit model markers win over provider defaults.
+    const thinking = /think|reason|glm-5\b/i.test(requested) ? true : (zaiOpts.thinkingEnabled !== false);
+    const search = /search/i.test(requested) ? true : !!zaiOpts.searchEnabled;
+    const base = this.resolveBaseUrl(account);
+    try {
+      const stream = await zaiChatCompletion({
+        baseUrl: base,
+        credential: account.apiKey,
+        model: zaiModel,
+        messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+        stream: parsed.stream !== false,
+        responseModel: requested,
+        thinkingEnabled: thinking,
+        searchEnabled: search,
+        signal,
+        dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
+      });
+      // Report the *requested* model name so clients see what they asked for.
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': parsed.stream !== false ? 'text/event-stream' : 'application/json' },
+      });
+    } catch (e) {
+      if (e instanceof ZaiWebError) return zaiError(e.status, e.message);
       throw e; // network-level: retry with backoff like any other provider
     }
   }
