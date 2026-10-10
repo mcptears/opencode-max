@@ -25,12 +25,17 @@ const fmtTime = (t) => new Date(t).toLocaleTimeString();
 // ---- section navigation ----
 const TITLES = { overview: 'Overview', accounts: 'Accounts', proxies: 'Proxies', settings: 'Settings', events: 'Events', setup: 'Setup' };
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => {
+  showSection(b.dataset.sec);
+});
+
+function showSection(name, title) {
   document.querySelectorAll('nav button').forEach((x) => x.classList.remove('active'));
   document.querySelectorAll('.sec').forEach((x) => x.classList.remove('active'));
-  b.classList.add('active');
-  $('#sec-' + b.dataset.sec).classList.add('active');
-  $('#secTitle').textContent = TITLES[b.dataset.sec];
-});
+  const navBtn = document.querySelector(`nav button[data-sec="${name}"]`);
+  if (navBtn) navBtn.classList.add('active');
+  $('#sec-' + name).classList.add('active');
+  $('#secTitle').textContent = title || TITLES[name] || name;
+}
 
 async function refresh() {
   try {
@@ -689,9 +694,7 @@ $('#qwenConnectForm').onsubmit = async (e) => {
   }
 };
 
-// ---- Provider cards (Accounts page) ----
-const collapsedProviders = new Set();
-
+// ---- Provider cards (Accounts page): click a card for its detail page ----
 function providerModelList(p) {
   if (p.protocol === 'qwen-web') {
     const map = (p.qwen && p.qwen.modelMap) || {};
@@ -710,6 +713,7 @@ function providerCardRows(accounts, s) {
     return `<tr><td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td>` +
       `<td>P${a.priority}</td>` +
       `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span></td>` +
+      `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>` +
       `<td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>` +
       `<td>${fmtMs(a.cooldownEndsInMs)}</td>` +
       `<td><div class="row-btns"><button class="btn danger" data-del="${esc(a.id)}">Remove</button>` +
@@ -725,7 +729,6 @@ function renderProviderCards() {
   const cards = upProviders.map((p) => {
     const accs = accounts.filter((a) => a.provider === p.id);
     const active = accs.filter((a) => a.state === 'active').length;
-    const open = !collapsedProviders.has(p.id);
     const models = providerModelList(p);
     const connectBtn = p.id === 'qwen'
       ? `<button class="btn primary" data-qconnect>Connect Qwen account</button>`
@@ -733,25 +736,17 @@ function renderProviderCards() {
         ? `<button class="btn primary" data-oconnect>Connect OpenCode account</button>`
         : '';
     return `<div class="pcard">
-      <div class="pcard-head" data-phead="${esc(p.id)}">
+      <div class="pcard-head" data-popen="${esc(p.id)}">
         <div><h3>${esc(p.name)}
           ${p.protocol === 'qwen-web' ? '<span class="tag">qwen-web</span>' : ''}
           <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></h3>
-          <div class="pcard-count">${accs.length} account${accs.length === 1 ? '' : 's'}${active !== accs.length ? ` · ${active} active` : ''} · ${esc(p.baseUrl || '')}</div>
+          <div class="pcard-count">${accs.length} account${accs.length === 1 ? '' : 's'}${active !== accs.length ? ` · ${active} active` : ''} · ${models.length} models</div>
+          <div class="hint">${esc(p.baseUrl || '')}</div>
         </div>
         <div class="row-btns" data-pactions="${esc(p.id)}">
           <button class="btn" data-ptest="${esc(p.id)}">Test</button>
           ${connectBtn}
-          <button class="btn" data-ptoggle-head="${esc(p.id)}">${open ? '▾' : '▸'}</button>
-        </div>
-      </div>
-      <div class="pcard-body" ${open ? '' : 'hidden'}>
-        <div><div class="hint">Models</div>
-          <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
-        </div>
-        <div><div class="hint">Accounts</div>
-          ${accs.length ? `<table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>5h usage</th><th>State</th><th>Cooldown</th><th></th></tr></thead><tbody>${providerCardRows(accs, s)}</tbody></table>`
-            : '<div class="hint">no accounts yet — connect one above</div>'}
+          <span class="pcard-go">→</span>
         </div>
       </div>
     </div>`;
@@ -767,17 +762,9 @@ function renderProviderCards() {
 
   el.innerHTML = cards + ghost || '<div class="hint">no providers configured</div>';
 
-  el.querySelectorAll('[data-phead]').forEach((h) => h.onclick = (e) => {
+  el.querySelectorAll('[data-popen]').forEach((h) => h.onclick = (e) => {
     if (e.target.closest('[data-pactions]')) return;
-    const id = h.dataset.phead;
-    collapsedProviders.has(id) ? collapsedProviders.delete(id) : collapsedProviders.add(id);
-    renderProviderCards();
-  });
-  el.querySelectorAll('[data-ptoggle-head]').forEach((b) => b.onclick = (e) => {
-    e.stopPropagation();
-    const id = b.dataset.ptoggleHead;
-    collapsedProviders.has(id) ? collapsedProviders.delete(id) : collapsedProviders.add(id);
-    renderProviderCards();
+    showProviderDetail(h.dataset.popen);
   });
   el.querySelectorAll('[data-ptest]').forEach((b) => b.onclick = async (e) => {
     e.stopPropagation();
@@ -801,16 +788,104 @@ function renderProviderCards() {
     if (r.ok || r.status === 409) { await loadUpProviders(); renderProviderCards(); }
     else { b.textContent = '✕ failed'; setTimeout(() => { b.disabled = false; b.textContent = 'Add Qwen provider'; }, 2000); }
   });
+}
+
+// ---- Provider detail page ----
+async function showProviderDetail(id) {
+  const p = upProviders.find((x) => x.id === id);
+  if (!p) return;
+  const el = $('#providerDetail');
+  const s = window._lastStatus || { accounts: [], quota5hLimit: 200 };
+  const accs = (s.accounts || []).filter((a) => a.provider === id);
+  const active = accs.filter((a) => a.state === 'active').length;
+  const usage = accs.reduce((n, a) => n + (a.usage5h || 0), 0);
+  const models = providerModelList(p);
+  const connectBtn = p.id === 'qwen'
+    ? `<button class="btn primary" id="pdQConnect">Connect Qwen account</button>`
+    : p.id === 'opencode-zen'
+      ? `<button class="btn primary" id="pdOConnect">Connect OpenCode account</button>`
+      : '';
+  el.innerHTML = `
+    <button class="btn" id="pdBack">← All providers</button>
+    <div class="panel-head" style="margin-top:14px"><h3>${esc(p.name)}
+      ${p.protocol === 'qwen-web' ? '<span class="tag">qwen-web</span>' : '<span class="tag">openai</span>'}
+      <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></h3>
+      <div class="row-btns">
+        <button class="btn" id="pdTest">Test</button>
+        <button class="btn" id="pdToggle">${p.enabled ? 'Disable' : 'Enable'}</button>
+        ${connectBtn}
+      </div></div>
+    <div class="hint" style="margin-bottom:14px"><code>${esc(p.baseUrl || '')}</code></div>
+    <div class="cards" id="pdStats"></div>
+    <h4 class="sub">Models <span class="hint">shared by all ${esc(p.name)} accounts</span></h4>
+    <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
+    <h4 class="sub">Accounts <span class="hint">${accs.length}</span></h4>
+    ${accs.length ? `<table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead>
+      <tbody>${providerCardRows(accs, s)}</tbody></table>`
+      : '<div class="hint">no accounts yet — connect one above</div>'}
+    <h4 class="sub">Recent requests <span class="hint">24h</span></h4>
+    <div id="pdHealth"><span class="hint">loading…</span></div>
+    <div id="pdReqs"><span class="hint">loading…</span></div>`;
+
+  $('#pdBack').onclick = () => showSection('accounts');
+  $('#pdTest').onclick = async (e) => {
+    const b = e.target; b.disabled = true; b.textContent = '…';
+    try {
+      const t = await (await api('/api/providers/' + encodeURIComponent(p.id) + '/test', { method: 'POST' })).json();
+      b.textContent = t.ok ? `✓ ${t.models} models` : `✕ ${t.error || 'failed'}`;
+    } catch { b.textContent = '✕ error'; }
+    setTimeout(() => { b.disabled = false; b.textContent = 'Test'; }, 2500);
+  };
+  $('#pdToggle').onclick = async () => {
+    await api('/api/providers/' + encodeURIComponent(p.id), { method: 'PUT', body: JSON.stringify({ ...p, enabled: !p.enabled }) });
+    await loadUpProviders();
+    showProviderDetail(id);
+  };
+  const q = $('#pdQConnect');
+  if (q) q.onclick = () => { $('#qwenConnectMsg').textContent = ''; $('#qwenConnectModal').hidden = false; };
+  const o = $('#pdOConnect');
+  if (o) o.onclick = () => openConnect();
   el.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
-    refresh();
+    refresh(); showProviderDetail(id);
   });
   el.querySelectorAll('[data-reset]').forEach((b) => b.onclick = async () => {
     await api('/api/accounts/' + encodeURIComponent(b.dataset.reset) + '/reset', { method: 'POST' });
-    refresh();
+    refresh(); showProviderDetail(id);
   });
   el.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openAccountEdit(b.dataset.edit));
+
+  showSection('provider', p.name);
+
+  // Health + recent requests for this provider.
+  try {
+    const { providers } = await (await api('/api/metrics/providers?hours=24')).json();
+    const h = (providers || []).find((x) => x.provider === id);
+    const cards = [
+      ['Accounts', `${accs.length}`],
+      ['Active', `${active}`],
+      ['5h usage', `${usage}`],
+      ['Success 24h', h ? `${h.successRate}%` : '—'],
+      ['Avg latency', h ? `${h.avgLatencyMs}<small> ms</small>` : '—'],
+      ['Requests 24h', h ? `${h.requests}` : '0'],
+    ];
+    $('#pdStats').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+    $('#pdHealth').innerHTML = h && h.lastErrorAt
+      ? `<div class="hint">last error: ${h.lastErrorStatus} · ${new Date(h.lastErrorAt).toLocaleString()}</div>` : '';
+  } catch { $('#pdStats').innerHTML = ''; $('#pdHealth').innerHTML = ''; }
+  try {
+    const { requests } = await (await api('/api/requests?limit=50')).json();
+    const rows = (requests || []).filter((r) => r.provider === id).slice(0, 15).map((r) => {
+      const time = new Date(r.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const cls = r.status >= 500 ? 'tag bad' : r.status >= 400 ? 'tag warn' : 'tag ok';
+      return `<tr><td>${time}</td><td><code>${esc(r.model || '—')}</code></td><td><code>${esc(r.accountId)}</code></td>` +
+        `<td><span class="${cls}">${r.status}</span></td><td>${r.latencyMs}<small> ms</small></td></tr>`;
+    }).join('');
+    $('#pdReqs').innerHTML = rows
+      ? `<table class="tbl"><thead><tr><th>Time</th><th>Model</th><th>Account</th><th>Status</th><th>Latency</th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<div class="hint">no requests yet</div>';
+  } catch { $('#pdReqs').innerHTML = ''; }
 }
 
 // ---- Account edit modal ----
