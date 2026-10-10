@@ -206,6 +206,11 @@
           </div>
 
           <div class="ptab" id="ptab-pool">
+            <div class="scraper-head">
+              <label class="check"><input type="checkbox" id="proxySelectAll"> <span class="hint">select all</span></label>
+              <button class="btn" id="proxyCheckBtn">Check health</button>
+              <span class="hint" id="proxyCheckStatus"></span>
+            </div>
             <ul class="plist" id="proxyList"></ul>
             <h4 class="sub">Replace pool <span class="hint">— one <code>http://user:pass@host:port</code> per line, empty = direct</span></h4>
             <form id="proxyForm" class="form-row">
