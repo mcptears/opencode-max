@@ -203,6 +203,18 @@ export interface ScrapeResult {  startedAt: number;
   working: string[];
 }
 
+export interface ScrapeProgress {
+  phase: 'fetching' | 'testing';
+  providersDone: number;
+  providersTotal: number;
+  currentProvider: string | null;
+  providerResults: { id: string; name: string; ok: boolean; found: number; error?: string }[];
+  found: number;
+  tested: number;
+  totalToTest: number;
+  working: number;
+}
+
 /** Fetch one provider's list. Throws on network/parse failure. */
 export async function fetchProvider(provider: ProxyProvider, timeoutMs = 20000): Promise<string[]> {
   const controller = new AbortController();
@@ -257,6 +269,7 @@ export async function testProxy(proxy: string, target = 'https://opencode.ai/zen
 export async function scrapeAll(
   providers: ProxyProvider[],
   opts: { maxTest?: number; concurrency?: number } = {},
+  onProgress?: (p: ScrapeProgress) => void,
 ): Promise<ScrapeResult> {
   const startedAt = Date.now();
   const maxTest = opts.maxTest ?? 120;
@@ -264,8 +277,25 @@ export async function scrapeAll(
   const perProvider: ScrapeResult['providers'] = [];
   const seen = new Set<string>();
   const candidates: string[] = [];
+  const enabled = providers.filter((x) => x.enabled);
+  const emit = (partial: Partial<ScrapeProgress> & { phase: 'fetching' | 'testing' }): void => {
+    try {
+      onProgress?.({
+        providersDone: perProvider.length,
+        providersTotal: enabled.length,
+        currentProvider: null,
+        providerResults: [...perProvider],
+        found: candidates.length,
+        tested: 0,
+        totalToTest: 0,
+        working: 0,
+        ...partial,
+      });
+    } catch { /* progress must never break the run */ }
+  };
 
-  for (const p of providers.filter((x) => x.enabled)) {
+  for (const p of enabled) {
+    emit({ phase: 'fetching', currentProvider: p.name });
     try {
       const found = await fetchProvider(p);
       let fresh = 0;
@@ -280,16 +310,21 @@ export async function scrapeAll(
     } catch (e) {
       perProvider.push({ id: p.id, name: p.name, ok: false, found: 0, error: String(e).slice(0, 120) });
     }
+    emit({ phase: 'fetching' });
   }
 
   const toTest = candidates.slice(0, maxTest);
   const working: string[] = [];
+  let tested = 0;
+  emit({ phase: 'testing', tested: 0, totalToTest: toTest.length, working: 0, found: candidates.length });
   for (let i = 0; i < toTest.length; i += concurrency) {
     const batch = toTest.slice(i, i + concurrency);
     const results = await Promise.all(batch.map((proxy) => testProxy(proxy)));
     results.forEach((ok, j) => {
       if (ok) working.push(batch[j]);
     });
+    tested += batch.length;
+    emit({ phase: 'testing', tested, totalToTest: toTest.length, working: working.length, found: candidates.length });
   }
 
   return {
