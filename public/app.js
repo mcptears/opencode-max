@@ -424,10 +424,36 @@ $('#providerForm').onsubmit = async (e) => {
 
 let scrapeTimer = null;
 // Show last scrape info when opening the tab.
+function renderScrapeProgress(p) {
+  const wrap = $('#scrapeProgress');
+  if (!p) {
+    wrap.hidden = false;
+    $('#scrapeBar').style.width = '2%';
+    $('#scrapePhase').textContent = 'starting…';
+    $('#scrapeLog').innerHTML = '';
+    return;
+  }
+  wrap.hidden = false;
+  let pct, phase;
+  if (p.phase === 'fetching') {
+    pct = p.providersTotal ? (p.providersDone / p.providersTotal) * 50 : 2;
+    phase = `fetching proxy lists ${p.providersDone}/${p.providersTotal}${p.currentProvider ? ` · ${p.currentProvider}` : ''} · ${p.found} candidates`;
+  } else {
+    pct = 50 + (p.totalToTest ? (p.tested / p.totalToTest) * 50 : 0);
+    phase = `testing proxies ${p.tested}/${p.totalToTest} · ${p.working} working so far`;
+  }
+  $('#scrapeBar').style.width = Math.min(99, Math.max(2, pct)).toFixed(1) + '%';
+  $('#scrapePhase').textContent = phase;
+  $('#scrapeLog').innerHTML = (p.providerResults || []).map((r) =>
+    `<li><span>${r.ok ? '✓' : '✕'} ${esc(r.name)} <span class="hint">· ${r.found} found${r.error ? ` · ${esc(r.error)}` : ''}</span></span></li>`
+  ).join('');
+}
+
 async function refreshScrapeStatus() {
   try {
     const s = await (await api('/api/scraper/status')).json();
-    if (s.running) { $('#scrapeStatus').textContent = 'scraping…'; return; }
+    if (s.running) { $('#scrapeStatus').textContent = 'scraping…'; renderScrapeProgress(s.progress); return; }
+    $('#scrapeProgress').hidden = true;
     if (s.lastRunAt) {
       const ago = Math.max(0, Math.round((Date.now() - s.lastRunAt) / 60000));
       const when = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ${ago % 60}m ago`;
@@ -445,9 +471,10 @@ $('#scrapeBtn').onclick = async () => {
   scrapeTimer = setInterval(async () => {
     try {
       const s = await (await api('/api/scraper/status')).json();
-      if (s.running) return;
+      if (s.running) { $('#scrapeStatus').textContent = 'scraping…'; renderScrapeProgress(s.progress); return; }
       clearInterval(scrapeTimer);
       $('#scrapeBtn').disabled = false;
+      $('#scrapeProgress').hidden = true;
       const res = s.result;
       if (!res) { $('#scrapeStatus').textContent = 'failed'; return; }
       const secs = ((res.finishedAt - res.startedAt) / 1000).toFixed(1);
