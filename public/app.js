@@ -645,6 +645,7 @@ async function loadUpProviders() {
 
 $('#providerProtocol').onchange = (e) => {
   $('#qwenOpts').hidden = e.target.value !== 'qwen-web';
+  $('#dsOpts').hidden = e.target.value !== 'deepseek-web';
 };
 
 $('#providerForm').onsubmit = async (e) => {
@@ -669,8 +670,24 @@ $('#providerForm').onsubmit = async (e) => {
     }
     payload.qwen = qwen;
   }
+  if (f.protocol.value === 'deepseek-web') {
+    payload.protocol = 'deepseek-web';
+    const deepseek = {};
+    if (f.dsDefaultModel.value.trim()) deepseek.defaultModel = f.dsDefaultModel.value.trim();
+    if (f.dsModelMap.value.trim()) {
+      try {
+        deepseek.modelMap = JSON.parse(f.dsModelMap.value);
+      } catch {
+        msg.textContent = '✕ model map is not valid JSON';
+        return;
+      }
+    }
+    deepseek.thinkingEnabled = f.dsThinking.checked;
+    deepseek.searchEnabled = f.dsSearch.checked;
+    payload.deepseek = deepseek;
+  }
   const r = await api('/api/providers', { method: 'POST', body: JSON.stringify(payload) });
-  if (r.ok) { f.reset(); $('#qwenOpts').hidden = true; msg.textContent = '✓ Provider added.'; loadUpProviders(); }
+  if (r.ok) { f.reset(); $('#qwenOpts').hidden = true; $('#dsOpts').hidden = true; msg.textContent = '✓ Provider added.'; loadUpProviders(); }
   else msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
 };
 
@@ -685,6 +702,19 @@ $('#qwenPresetBtn').onclick = async () => {
   }
   loadUpProviders();
 };
+
+$('#dsPresetBtn').onclick = async () => {
+  const msg = $('#providerMsg');
+  const r = await api('/api/providers/preset/deepseek', { method: 'POST' });
+  if (r.ok) {
+    msg.textContent = '✓ DeepSeek provider added — now connect your DeepSeek account.';
+  } else {
+    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
+  }
+  loadUpProviders();
+};
+
+$('#dsConnectBtn').onclick = () => openDsConnect();
 
 // ---- Connect Qwen account ----
 document.querySelectorAll('[data-qtab]').forEach((btn) => {
@@ -775,11 +805,98 @@ $('#qwenConnectForm').onsubmit = async (e) => {
   }
 };
 
+// ---- Connect DeepSeek account ----
+document.querySelectorAll('[data-dstab]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('[data-dstab]').forEach((b) => b.classList.toggle('on', b === btn));
+    $('#dstab-signin').hidden = btn.dataset.dstab !== 'signin';
+    $('#dstab-token').hidden = btn.dataset.dstab !== 'token';
+    $('#dsConnectMsg').textContent = '';
+  };
+});
+$('#dsConnectClose').onclick = () => { $('#dsConnectModal').hidden = true; };
+
+function openDsConnect() {
+  $('#dsConnectMsg').textContent = '';
+  $('#dsConnectForm').reset();
+  const sf = $('#dsSigninForm');
+  if (sf) sf.reset();
+  $('#dsConnectModal').hidden = false;
+}
+
+$('#dsSigninForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#dsConnectMsg');
+  const email = f.email.value.trim();
+  const password = f.password.value;
+  if (!email || !password) { msg.textContent = '✕ email and password are required'; return; }
+  msg.textContent = 'Signing in…';
+  try {
+    const hash = await sha256Hex(password);
+    const payload = hash
+      ? { email, passwordHash: hash, name: f.name.value.trim() }
+      : { email, password, name: f.name.value.trim() }; // server hashes
+    const r = await api('/api/accounts/deepseek-login', { method: 'POST', body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) { msg.textContent = '✕ ' + (j.error || 'sign-in failed'); return; }
+    msg.textContent = '✓ DeepSeek account connected.';
+    $('#dsConnectModal').hidden = true;
+    loadUpProviders();
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
+};
+
+$('#dsConnectForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $('#dsConnectMsg');
+  const credential = f.credential.value.trim();
+  if (!credential) { msg.textContent = '✕ paste your DeepSeek token first'; return; }
+  msg.textContent = 'Validating token…';
+  try {
+    const v = await (await api('/api/accounts/validate-deepseek', {
+      method: 'POST', body: JSON.stringify({ credential }),
+    })).json();
+    if (!v.ok) { msg.textContent = '✕ ' + (v.error || 'token rejected'); return; }
+    // Make sure the DeepSeek provider exists (the sign-in tab does this
+    // server-side; the paste-token tab must do it here). 409 = already there.
+    msg.textContent = 'Setting up DeepSeek provider…';
+    const preset = await api('/api/providers/preset/deepseek', { method: 'POST' });
+    if (!preset.ok && preset.status !== 409) {
+      msg.textContent = '✕ could not add DeepSeek provider: ' + (await preset.text()).slice(0, 160);
+      return;
+    }
+    const list = await (await api('/api/accounts')).json();
+    const ids = new Set((list.accounts || []).map((a) => a.id));
+    let n = 1;
+    while (ids.has(`deepseek-${n}`)) n++;
+    const r = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: `deepseek-${n}`, name: f.name.value.trim() || `DeepSeek ${n}`,
+        provider: 'deepseek', apiKey: credential, priority: Number(f.priority.value) || n,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+    msg.textContent = '✓ DeepSeek account connected.';
+    $('#dsConnectModal').hidden = true;
+    refresh();
+  } catch (err) {
+    msg.textContent = '✕ ' + String(err && err.message || err).slice(0, 200);
+  }
+};
+
 // ---- Provider cards (Accounts page): click a card for its detail page ----
 function providerModelList(p) {
   if (p.protocol === 'qwen-web') {
     const map = (p.qwen && p.qwen.modelMap) || {};
     const names = [p.qwen && p.qwen.defaultModel, ...Object.keys(map)].filter(Boolean);
+    return [...new Set(names)];
+  }
+  if (p.protocol === 'deepseek-web') {
+    const map = (p.deepseek && p.deepseek.modelMap) || {};
+    const names = [p.deepseek && p.deepseek.defaultModel, ...Object.keys(map)].filter(Boolean);
     return [...new Set(names)];
   }
   return p.models || [];
@@ -813,13 +930,20 @@ function renderProviderCards() {
     const models = providerModelList(p);
     const connectBtn = p.id === 'qwen'
       ? `<button class="btn primary" data-qconnect>Connect Qwen account</button>`
-      : p.id === 'opencode-zen'
-        ? `<button class="btn primary" data-oconnect>Connect OpenCode account</button>`
+      : p.id === 'deepseek'
+        ? `<button class="btn primary" data-dsconnect>Connect DeepSeek account</button>`
+        : p.id === 'opencode-zen'
+          ? `<button class="btn primary" data-oconnect>Connect OpenCode account</button>`
+          : '';
+    const protoTag = p.protocol === 'qwen-web'
+      ? '<span class="tag">qwen-web</span>'
+      : p.protocol === 'deepseek-web'
+        ? '<span class="tag">deepseek-web</span>'
         : '';
     return `<div class="pcard">
       <div class="pcard-head" data-popen="${esc(p.id)}">
         <div><h3>${esc(p.name)}
-          ${p.protocol === 'qwen-web' ? '<span class="tag">qwen-web</span>' : ''}
+          ${protoTag}
           <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></h3>
           <div class="pcard-count">${accs.length} account${accs.length === 1 ? '' : 's'}${active !== accs.length ? ` · ${active} active` : ''} · ${models.length} models</div>
           <div class="hint">${esc(p.baseUrl || '')}</div>
@@ -833,15 +957,24 @@ function renderProviderCards() {
     </div>`;
   }).join('');
 
-  // Ghost card: offer the built-in Qwen provider when it isn't added yet.
-  const ghost = upProviders.some((p) => p.id === 'qwen') ? '' :
-    `<div class="pcard ghost">
+  // Ghost cards: offer the built-in providers when they aren't added yet.
+  const ghosts = [];
+  if (!upProviders.some((p) => p.id === 'qwen')) {
+    ghosts.push(`<div class="pcard ghost">
       <div class="pcard-head"><div><h3>Qwen <span class="tag">qwen-web</span> <span class="tag">built-in</span></h3>
       <div class="pcard-count">free Qwen chat — no separate deployment</div></div>
       <div class="row-btns"><button class="btn primary" data-qpreset>Add Qwen provider</button></div></div>
-    </div>`;
+    </div>`);
+  }
+  if (!upProviders.some((p) => p.id === 'deepseek')) {
+    ghosts.push(`<div class="pcard ghost">
+      <div class="pcard-head"><div><h3>DeepSeek <span class="tag">deepseek-web</span> <span class="tag">built-in</span></h3>
+      <div class="pcard-count">free DeepSeek chat — no separate deployment</div></div>
+      <div class="row-btns"><button class="btn primary" data-dspreset>Add DeepSeek provider</button></div></div>
+    </div>`);
+  }
 
-  el.innerHTML = cards + ghost || '<div class="hint">no providers configured</div>';
+  el.innerHTML = cards + ghosts.join('') || '<div class="hint">no providers configured</div>';
 
   el.querySelectorAll('[data-popen]').forEach((h) => h.onclick = (e) => {
     if (e.target.closest('[data-pactions]')) return;
@@ -869,6 +1002,17 @@ function renderProviderCards() {
     if (r.ok || r.status === 409) { await loadUpProviders(); renderProviderCards(); }
     else { b.textContent = '✕ failed'; setTimeout(() => { b.disabled = false; b.textContent = 'Add Qwen provider'; }, 2000); }
   });
+  el.querySelectorAll('[data-dspreset]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    const r = await api('/api/providers/preset/deepseek', { method: 'POST' });
+    if (r.ok || r.status === 409) { await loadUpProviders(); renderProviderCards(); }
+    else { b.textContent = '✕ failed'; setTimeout(() => { b.disabled = false; b.textContent = 'Add DeepSeek provider'; }, 2000); }
+  });
+  el.querySelectorAll('[data-dsconnect]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    openDsConnect();
+  });
 }
 
 // ---- Provider detail page ----
@@ -883,13 +1027,29 @@ async function showProviderDetail(id) {
   const models = providerModelList(p);
   const connectBtn = p.id === 'qwen'
     ? `<button class="btn primary" id="pdQConnect">Connect Qwen account</button>`
-    : p.id === 'opencode-zen'
-      ? `<button class="btn primary" id="pdOConnect">Connect OpenCode account</button>`
-      : '';
+    : p.id === 'deepseek'
+      ? `<button class="btn primary" id="pdDsConnect">Connect DeepSeek account</button>`
+      : p.id === 'opencode-zen'
+        ? `<button class="btn primary" id="pdOConnect">Connect OpenCode account</button>`
+        : '';
+  const detailProtoTag = p.protocol === 'qwen-web'
+    ? '<span class="tag">qwen-web</span>'
+    : p.protocol === 'deepseek-web'
+      ? '<span class="tag">deepseek-web</span>'
+      : '<span class="tag">openai</span>';
+  // DeepSeek web options: DeepThink / web-search toggles, saved live.
+  const dsOpts = p.protocol === 'deepseek-web' ? `
+    <h4 class="sub">DeepSeek options</h4>
+    <div class="row-btns" style="margin-bottom:6px">
+      <label class="check"><input type="checkbox" id="pdDsThinking"${p.deepseek && p.deepseek.thinkingEnabled ? ' checked' : ''}> DeepThink <span class="hint">reasoning on by default</span></label>
+      <label class="check"><input type="checkbox" id="pdDsSearch"${p.deepseek && p.deepseek.searchEnabled ? ' checked' : ''}> Web search <span class="hint">search on by default</span></label>
+    </div>
+    <div class="hint" id="pdDsMsg" style="margin-bottom:10px">Model names still win: <code>deepseek-reasoner</code> forces DeepThink, <code>*search*</code> forces web search.</div>`
+    : '';
   el.innerHTML = `
     <button class="btn" id="pdBack">← All providers</button>
     <div class="panel-head" style="margin-top:14px"><h3>${esc(p.name)}
-      ${p.protocol === 'qwen-web' ? '<span class="tag">qwen-web</span>' : '<span class="tag">openai</span>'}
+      ${detailProtoTag}
       <span class="tag ${p.enabled ? 'ok' : ''}">${p.enabled ? 'on' : 'off'}</span></h3>
       <div class="row-btns">
         <button class="btn" id="pdTest">Test</button>
@@ -897,6 +1057,7 @@ async function showProviderDetail(id) {
         ${connectBtn}
       </div></div>
     <div class="hint" style="margin-bottom:14px"><code>${esc(p.baseUrl || '')}</code></div>
+    ${dsOpts}
     <div class="cards" id="pdStats"></div>
     <h4 class="sub">Models <span class="hint">shared by all ${esc(p.name)} accounts</span></h4>
     <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
@@ -924,8 +1085,29 @@ async function showProviderDetail(id) {
   };
   const q = $('#pdQConnect');
   if (q) q.onclick = () => { $('#qwenConnectMsg').textContent = ''; $('#qwenConnectModal').hidden = false; };
+  const dsc = $('#pdDsConnect');
+  if (dsc) dsc.onclick = () => openDsConnect();
   const o = $('#pdOConnect');
   if (o) o.onclick = () => openConnect();
+  // DeepSeek DeepThink / web-search toggles — saved live to the provider.
+  const dsT = $('#pdDsThinking'), dsS = $('#pdDsSearch');
+  const saveDsOpts = async () => {
+    if (!dsT || !dsS) return;
+    const msg = $('#pdDsMsg');
+    const deepseek = { ...(p.deepseek || {}), thinkingEnabled: dsT.checked, searchEnabled: dsS.checked };
+    const r = await api('/api/providers/' + encodeURIComponent(p.id), {
+      method: 'PUT', body: JSON.stringify({ ...p, deepseek }),
+    });
+    if (r.ok) {
+      p.deepseek = deepseek;
+      await loadUpProviders();
+      if (msg) msg.textContent = '✓ saved';
+    } else if (msg) {
+      msg.textContent = '✕ save failed';
+    }
+  };
+  if (dsT) dsT.onchange = saveDsOpts;
+  if (dsS) dsS.onchange = saveDsOpts;
   el.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm(`Remove account ${b.dataset.del}?`)) return;
     await jdel('/api/accounts/' + encodeURIComponent(b.dataset.del));
