@@ -424,6 +424,7 @@ export class UpstreamClient {
       const stream = await qwenChatCompletion({
         baseUrl: base,
         credential: account.apiKey,
+        cookies: account.cookies,
         model: qwenModel,
         messages: Array.isArray(parsed.messages) ? parsed.messages : [],
         stream: parsed.stream !== false,
