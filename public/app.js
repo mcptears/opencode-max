@@ -23,7 +23,7 @@ const fmtMs = (ms) => ms <= 0 ? '—' : ms < 60000 ? Math.ceil(ms / 1000) + 's' 
 const fmtTime = (t) => new Date(t).toLocaleTimeString();
 
 // ---- section navigation ----
-const TITLES = { overview: 'Overview', accounts: 'Accounts', proxies: 'Proxies', settings: 'Settings', events: 'Events', setup: 'Setup' };
+const TITLES = { overview: 'Overview', accounts: 'Accounts', providers: 'Providers', playground: 'Playground', proxies: 'Proxies', settings: 'Settings', events: 'Events', setup: 'Setup' };
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => {
   showSection(b.dataset.sec);
 });
@@ -465,7 +465,7 @@ async function loadProviders() {
   } catch { /* ignore */ }
 }
 
-$('#providerForm').onsubmit = async (e) => {
+$('#proxyProviderForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
   const r = await api('/api/scraper/providers', {
@@ -643,6 +643,40 @@ async function loadUpProviders() {
   } catch { /* ignore */ }
 }
 
+// ---- Add-provider dialog ----
+$('#addProviderBtn').onclick = () => {
+  $('#providerMsg').textContent = '';
+  $('#addProviderModal').hidden = false;
+};
+$('#addProviderClose').onclick = () => { $('#addProviderModal').hidden = true; };
+document.querySelectorAll('[data-aptab]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('[data-aptab]').forEach((b) => b.classList.toggle('on', b === btn));
+    $('#aptab-builtin').hidden = btn.dataset.aptab !== 'builtin';
+    $('#aptab-custom').hidden = btn.dataset.aptab !== 'custom';
+    $('#providerMsg').textContent = '';
+  };
+});
+
+async function addBuiltinPreset(kind) {
+  const msg = $('#providerMsg');
+  const r = await api('/api/providers/preset/' + kind, { method: 'POST' });
+  if (r.ok) {
+    msg.textContent = '✓ provider added — now connect an account below.';
+  } else if (r.status === 409) {
+    msg.textContent = 'provider already exists.';
+  } else {
+    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
+  }
+  loadUpProviders();
+}
+$('#apQwenPreset').onclick = () => addBuiltinPreset('qwen');
+$('#apDsPreset').onclick = () => addBuiltinPreset('deepseek');
+$('#apZaiPreset').onclick = () => addBuiltinPreset('zai');
+$('#apQwenConnect').onclick = () => { $('#addProviderModal').hidden = true; $('#qwenConnectMsg').textContent = ''; $('#qwenConnectModal').hidden = false; };
+$('#apDsConnect').onclick = () => { $('#addProviderModal').hidden = true; openDsConnect(); };
+$('#apZaiConnect').onclick = () => { $('#addProviderModal').hidden = true; $('#zaiConnectMsg').textContent = ''; $('#zaiConnectForm').reset(); $('#zaiConnectModal').hidden = false; };
+
 $('#providerProtocol').onchange = (e) => {
   $('#qwenOpts').hidden = e.target.value !== 'qwen-web';
   $('#dsOpts').hidden = e.target.value !== 'deepseek-web';
@@ -704,45 +738,14 @@ $('#providerForm').onsubmit = async (e) => {
     payload.zai = zai;
   }
   const r = await api('/api/providers', { method: 'POST', body: JSON.stringify(payload) });
-  if (r.ok) { f.reset(); $('#qwenOpts').hidden = true; $('#dsOpts').hidden = true; $('#zaiOpts').hidden = true; msg.textContent = '✓ Provider added.'; loadUpProviders(); }
+  if (r.ok) {
+    f.reset();
+    $('#qwenOpts').hidden = true; $('#dsOpts').hidden = true; $('#zaiOpts').hidden = true;
+    $('#addProviderModal').hidden = true;
+    loadUpProviders();
+  }
   else msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
 };
-
-$('#qwenPresetBtn').onclick = async () => {
-  const msg = $('#providerMsg');
-  const r = await api('/api/providers/preset/qwen', { method: 'POST' });
-  if (r.ok) {
-    const j = await r.json().catch(() => ({}));
-    msg.textContent = j.upgraded ? '✓ Qwen provider upgraded to the built-in native version.' : '✓ Qwen provider added — now connect your Qwen account.';
-  } else {
-    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
-  }
-  loadUpProviders();
-};
-
-$('#dsPresetBtn').onclick = async () => {
-  const msg = $('#providerMsg');
-  const r = await api('/api/providers/preset/deepseek', { method: 'POST' });
-  if (r.ok) {
-    msg.textContent = '✓ DeepSeek provider added — now connect your DeepSeek account.';
-  } else {
-    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
-  }
-  loadUpProviders();
-};
-
-$('#zaiPresetBtn').onclick = async () => {
-  const msg = $('#providerMsg');
-  const r = await api('/api/providers/preset/zai', { method: 'POST' });
-  if (r.ok) {
-    msg.textContent = '✓ Z.ai provider added — now connect your Z.ai account.';
-  } else {
-    msg.textContent = '✕ ' + (await r.text()).slice(0, 200);
-  }
-  loadUpProviders();
-};
-
-$('#dsConnectBtn').onclick = () => openDsConnect();
 
 // ---- Connect Qwen account ----
 document.querySelectorAll('[data-qtab]').forEach((btn) => {
@@ -753,13 +756,6 @@ document.querySelectorAll('[data-qtab]').forEach((btn) => {
     $('#qwenConnectMsg').textContent = '';
   };
 });
-$('#qwenConnectBtn').onclick = () => {
-  $('#qwenConnectMsg').textContent = '';
-  $('#qwenConnectForm').reset();
-  const sf = $('#qwenSigninForm');
-  if (sf) sf.reset();
-  $('#qwenConnectModal').hidden = false;
-};
 $('#qwenConnectClose').onclick = () => { $('#qwenConnectModal').hidden = true; };
 
 async function sha256Hex(text) {
@@ -974,11 +970,6 @@ $('#dsConnectForm').onsubmit = async (e) => {
 
 // ---- Connect Z.ai account (paste token — the captcha is solved in the user's own browser) ----
 $('#zaiConnectClose').onclick = () => { $('#zaiConnectModal').hidden = true; };
-$('#zaiConnectBtn').onclick = () => {
-  $('#zaiConnectMsg').textContent = '';
-  $('#zaiConnectForm').reset();
-  $('#zaiConnectModal').hidden = false;
-};
 
 $('#zaiConnectForm').onsubmit = async (e) => {
   e.preventDefault();
@@ -1421,3 +1412,133 @@ $('#accountForm').onsubmit = async (e) => {
 
 loadProxies(); loadSettings(); loadUpProviders(); refresh();
 setInterval(refresh, 3000);
+
+// ---- Playground: chat with a connected model to verify it ----
+let pgHistory = [];
+let pgSending = false;
+
+async function pgLoadModels() {
+  const sel = $('#pgModel');
+  try {
+    const { data } = await (await api('/v1/models')).json();
+    const ids = (data || []).map((m) => m.id).filter(Boolean);
+    sel.innerHTML = ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('')
+      || '<option value="">no models available</option>';
+  } catch {
+    sel.innerHTML = '<option value="">could not load models</option>';
+  }
+}
+
+function pgAddMsg(role, text) {
+  const wrap = $('#pgMsgs');
+  const empty = wrap.querySelector('.pg-empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'msg msg-' + role;
+  div.textContent = text;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+  return div;
+}
+
+function pgAddThinking(container, text) {
+  let el = container.querySelector('.msg-think');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'msg-think';
+    container.prepend(el);
+  }
+  el.textContent = '💭 ' + text;
+  $('#pgMsgs').scrollTop = $('#pgMsgs').scrollHeight;
+}
+
+$('#pgNew').onclick = () => {
+  pgHistory = [];
+  $('#pgMsgs').innerHTML = '<div class="pg-empty">Pick a model and say hello — verify it answers before wiring it to external agents.</div>';
+  $('#pgHint').textContent = '';
+};
+
+$('#pgForm').onsubmit = async (e) => {
+  e.preventDefault();
+  if (pgSending) return;
+  const input = $('#pgInput');
+  const text = input.value.trim();
+  const model = $('#pgModel').value;
+  if (!text || !model) return;
+  pgSending = true;
+  $('#pgSend').disabled = true;
+  $('#pgHint').textContent = '';
+  pgAddMsg('user', text);
+  pgHistory.push({ role: 'user', content: text });
+  input.value = '';
+  const bubble = pgAddMsg('assistant', '');
+  bubble.classList.add('typing');
+  try {
+    const r = await api('/api/playground/chat', {
+      method: 'POST',
+      body: JSON.stringify({ model, messages: pgHistory }),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 200));
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let content = '', thinking = '';
+    bubble.classList.remove('typing');
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let chunk;
+        try { chunk = JSON.parse(payload); } catch { continue; }
+        const choice = chunk.choices && chunk.choices[0];
+        if (!choice) continue;
+        if (choice.message) {
+          content = choice.message.content || '';
+          thinking = choice.message.reasoning_content || '';
+          continue;
+        }
+        const delta = choice.delta;
+        if (!delta) continue;
+        if (delta.reasoning_content) {
+          thinking += delta.reasoning_content;
+          pgAddThinking(bubble, thinking);
+        }
+        if (delta.content) {
+          content += delta.content;
+          const thinkEl = bubble.querySelector('.msg-think');
+          bubble.textContent = content;
+          if (thinkEl) bubble.prepend(thinkEl);
+        }
+        if (choice.finish_reason) break;
+      }
+    }
+    pgHistory.push({ role: 'assistant', content });
+    if (!content && !thinking) bubble.innerHTML = '<span class="hint">empty response</span>';
+  } catch (err) {
+    bubble.classList.remove('typing');
+    bubble.className = 'msg msg-err';
+    bubble.textContent = '✕ ' + String(err && err.message || err).slice(0, 300);
+    $('#pgHint').textContent = 'The model failed — check its provider and account before wiring it to external agents.';
+  } finally {
+    pgSending = false;
+    $('#pgSend').disabled = false;
+    $('#pgMsgs').scrollTop = $('#pgMsgs').scrollHeight;
+  }
+};
+
+$('#pgInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    $('#pgForm').requestSubmit();
+  }
+});
+
+// Refresh the playground model list whenever the section opens.
+document.querySelector('nav button[data-sec="playground"]').addEventListener('click', pgLoadModels);
