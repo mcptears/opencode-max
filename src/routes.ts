@@ -11,6 +11,7 @@ import { UpstreamClient } from './upstreamClient.js';
 import type { Alerter } from './alerts.js';
 import { matchProvider, defaultProvider, type ProviderConfig } from './providers.js';
 import { getSettings } from './settings.js';
+import { adminAuth } from './adminRoutes.js';
 
 /**
  * Abort the upstream fetch if the client goes away mid-request.
@@ -244,6 +245,47 @@ export function buildRouter(
 
   router.post('/v1/chat/completions', proxy);
   router.post('/v1/messages', proxy);
+
+  /**
+   * Playground chat (dashboard only, admin-authed). Lets the user talk to any
+   * connected model to verify it before wiring it to external agents. Runs
+   * through the same upstream pipeline as /v1/chat/completions.
+   */
+  router.post('/api/playground/chat', adminAuth, async (req, res, next) => {
+    try {
+      let body: { model?: unknown; messages?: unknown } = {};
+      try {
+        body = JSON.parse(Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '{}');
+      } catch {
+        /* fall through to validation */
+      }
+      const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : '';
+      if (!model) {
+        res.status(400).json({ error: { message: 'model is required', status: 400 } });
+        return;
+      }
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const bodyText = JSON.stringify({ model, messages, stream: true });
+      const result = await upstream.forward({
+        method: 'POST',
+        path: '/chat/completions',
+        query: '',
+        headers: { 'content-type': 'application/json' },
+        bodyText,
+        allowAnonymous: true,
+        signal: abortOnClientClose(res),
+      });
+      res.status(result.status);
+      for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, v);
+      if (result.body) {
+        Readable.fromWeb(result.body as unknown as NodeWebStream).pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (err) {
+      next(err);
+    }
+  });
   // Catch-all for any other upstream paths.
   router.all(/^\/v1\/.*/, proxy);
 
