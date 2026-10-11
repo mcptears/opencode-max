@@ -145,23 +145,43 @@ export function qwenAuthHeaders(credential: string): Record<string, string> {
 }
 
 async function headers(credential: string, cookies?: string): Promise<Record<string, string>> {
+  const cred = credential?.trim();
+  if (cred) {
+    // Logged-in: Bearer token only, browser-like headers. No baxia.
+    const h: Record<string, string> = {
+      'Authorization': `Bearer ${cred}`,
+      'x-request-id': crypto.randomUUID(),
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Referer': 'https://chat.qwen.ai/',
+      'Origin': 'https://chat.qwen.ai',
+      'Connection': 'keep-alive',
+      'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'content-type': 'application/json',
+    };
+    if (cookies?.trim()) h['Cookie'] = cookies.trim();
+    return h;
+  }
+  // Guest: baxia headers only.
+  const baxia = await qwenBaxiaHeaders();
   const h: Record<string, string> = {
     'Accept': 'application/json',
     'content-type': 'application/json',
     'Origin': 'https://chat.qwen.ai',
     'Referer': 'https://chat.qwen.ai/c/guest',
-    source: 'web',
+    'source': 'web',
     'version': '0.2.83',
     'x-request-id': crypto.randomUUID(),
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'user-agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
   };
-  // Baxia (WAF bypass) + Bearer token (the login) + cookies. All three.
-  const baxia = await qwenBaxiaHeaders();
   if (baxia['bx-umidtoken']) Object.assign(h, baxia);
-  const cred = credential?.trim();
-  if (cred) Object.assign(h, qwenAuthHeaders(cred));
   if (cookies?.trim()) h['Cookie'] = cookies.trim();
   return h;
 }
@@ -394,6 +414,7 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
         method: 'POST',
         body: JSON.stringify({
           stream: true,
+          version: '2.1',
           incremental_output: true,
           chat_id: chatId,
           chat_mode: chatMode(req.credential),
