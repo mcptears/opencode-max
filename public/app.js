@@ -7,11 +7,16 @@ async function api(path, opts = {}) {
   if (adminToken) headers['Authorization'] = 'Bearer ' + adminToken;
   const res = await fetch(path, { ...opts, headers });
   if (res.status === 401 && !opts._retried) {
-    const t = prompt('Admin token required:');
-    if (t) {
-      adminToken = t;
-      localStorage.setItem('om_admin_token', t);
-      return api(path, { ...opts, _retried: true });
+    // Only prompt for the admin token when OUR server rejects it — not when
+    // an upstream provider (Qwen/DeepSeek/Z.ai) returns 401 for a bad account token.
+    const body = await res.clone().text().catch(() => '');
+    if (body.includes('admin token required')) {
+      const t = prompt('Admin token required:');
+      if (t) {
+        adminToken = t;
+        localStorage.setItem('om_admin_token', t);
+        return api(path, { ...opts, _retried: true });
+      }
     }
   }
   return res;
