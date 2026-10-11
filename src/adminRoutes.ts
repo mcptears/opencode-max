@@ -616,6 +616,17 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     const providers = loadProviders();
     const existing = providers.find((p) => p.id === ZAI_PRESET.id);
     if (existing) {
+      // Upgrade path: refresh stale model ids (e.g. glm-5 -> glm-5.3-flash).
+      // Accounts keep working (same provider id).
+      const zai = (existing as { zai?: { defaultModel?: string } }).zai;
+      if (zai?.defaultModel !== ZAI_PRESET.zai?.defaultModel) {
+        const i = providers.indexOf(existing);
+        providers[i] = { ...existing, ...ZAI_PRESET, name: existing.name || ZAI_PRESET.name };
+        saveProviders(providers);
+        metrics.record('settings', 'z.ai provider models refreshed');
+        res.json({ ok: true, upgraded: true, provider: ZAI_PRESET });
+        return;
+      }
       res.status(409).json({ error: { message: 'z.ai provider already exists', status: 409 } });
       return;
     }
