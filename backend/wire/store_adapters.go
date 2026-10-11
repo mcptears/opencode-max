@@ -36,6 +36,13 @@ func (s *ProviderStore) Save(ps []api.ProviderConfig) {
 	_ = providers.Save(s.path, out)
 }
 
+// LoadTypes returns the raw types.ProviderConfig list, for the upstream
+// client which needs the typed protocol options.
+func (s *ProviderStore) LoadTypes() []types.ProviderConfig {
+	ps, _ := providers.Load(s.path)
+	return ps
+}
+
 func toAPIProvider(p types.ProviderConfig) api.ProviderConfig {
 	// Same JSON shape; round-trip for the Protocol string type.
 	var out api.ProviderConfig
