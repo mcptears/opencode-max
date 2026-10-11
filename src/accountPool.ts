@@ -210,6 +210,7 @@ export class AccountPool {
         name: a.name,
         provider: a.provider,
         priority: a.priority,
+        useProxy: a.useProxy,
         state,
         cooldownEndsInMs: state === 'cooling_down' ? Math.max(0, until - now) : 0,
         usage5h: this.quota?.usage(a.id) ?? 0,
