@@ -61,6 +61,9 @@ function accountRows(s, withActions) {
     const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
     const proxyOn = a.useProxy !== false;
+    const stateBadge = a.state !== 'active'
+      ? `<button class="badge ${a.state}" data-reset="${esc(a.id)}" style="cursor:pointer;border:none" title="click to reset cooldown">${a.state.replace('_', ' ')}</button>`
+      : `<span class="badge ${a.state}">${a.state.replace('_', ' ')}</span>`;
     const proxyCell = `<td><label class="hint" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" data-proxy="${esc(a.id)}"${proxyOn ? ' checked' : ''}> proxy</label></td>`;
     const usageCell = `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span>${a.inflight > 0 ? ` <span class="hint">· ${a.inflight} in flight</span>` : ''}</td>`;
     const latencyCell = `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>`;
@@ -68,7 +71,7 @@ function accountRows(s, withActions) {
       ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>${proxyCell}${usageCell}${latencyCell}`
       : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>${proxyCell}${usageCell}`;
     return `<tr>${cells}
-      <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
+      <td>${stateBadge}</td>
       <td>${fmtMs(a.cooldownEndsInMs)}</td>
       ${withActions ? `<td><button class="btn danger" data-del="${esc(a.id)}">Remove</button>${editBtn}${resetBtn}</td>` : ''}</tr>`;
   }).join('');
@@ -193,6 +196,10 @@ function renderStatus(s) {
         method: 'PATCH', body: JSON.stringify({ useProxy: c.checked }),
       });
     } catch (err) { c.checked = !c.checked; }
+  });
+  $('#accountsTblMini').querySelectorAll('[data-reset]').forEach((b) => b.onclick = async () => {
+    await api('/api/accounts/' + encodeURIComponent(b.dataset.reset) + '/reset', { method: 'POST' });
+    refresh();
   });
   renderProviderCards();
 
@@ -1064,12 +1071,15 @@ function providerCardRows(accounts, s) {
     const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
     const proxyOn = a.useProxy !== false;
+    const stateBadge = a.state !== 'active'
+      ? `<button class="badge ${a.state}" data-reset="${esc(a.id)}" style="cursor:pointer;border:none" title="click to reset cooldown">${a.state.replace('_', ' ')}</button>`
+      : `<span class="badge ${a.state}">${a.state.replace('_', ' ')}</span>`;
     return `<tr><td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td>` +
       `<td>P${a.priority}</td>` +
       `<td><label class="hint" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" data-proxy="${esc(a.id)}"${proxyOn ? ' checked' : ''}> proxy</label></td>` +
       `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span></td>` +
       `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>` +
-      `<td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>` +
+      `<td>${stateBadge}</td>` +
       `<td>${fmtMs(a.cooldownEndsInMs)}</td>` +
       `<td><div class="row-btns"><button class="btn danger" data-del="${esc(a.id)}">Remove</button>` +
       `<button class="btn" data-edit="${esc(a.id)}">Edit</button>${resetBtn}</div></td></tr>`;
