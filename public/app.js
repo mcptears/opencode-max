@@ -662,7 +662,8 @@ async function addBuiltinPreset(kind) {
   const msg = $('#providerMsg');
   const r = await api('/api/providers/preset/' + kind, { method: 'POST' });
   if (r.ok) {
-    msg.textContent = '✓ provider added — now connect an account below.';
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = j.upgraded ? '✓ provider models refreshed.' : '✓ provider added — now connect an account below.';
   } else if (r.status === 409) {
     msg.textContent = 'provider already exists.';
   } else {
