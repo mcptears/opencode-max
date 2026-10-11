@@ -338,7 +338,10 @@ async function createChat(baseUrl: string, credential: string, model: string, op
     cookies,
   );
   if (r.status === 401 || r.status === 403) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
-  if (!r.ok) throw new QwenWebError(`qwen create-chat failed (${r.status})`, r.status >= 500 ? 502 : r.status);
+  if (!r.ok) {
+    const bodyPreview = await r.text().then(t => t.slice(0, 300)).catch(() => '(unreadable)');
+    throw new QwenWebError(`qwen create-chat failed (${r.status}): ${bodyPreview}`, r.status >= 500 ? 502 : r.status);
+  }
   const j = (await r.json().catch(() => null)) as { data?: { id?: string } } | null;
   const id = j?.data?.id;
   if (!id) throw new QwenWebError('qwen create-chat returned no chat id', 502);
@@ -459,7 +462,7 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
     const text = await upstream.text().catch(() => '');
     void deleteChat(req.baseUrl, req.credential, chatId, opts);
     if (upstream.status === 401 || upstream.status === 403) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
-    throw riskControlError(text) ?? new QwenWebError(`qwen completions failed (${upstream.status})`, upstream.status >= 500 ? 502 : upstream.status);
+    throw riskControlError(text) ?? new QwenWebError(`qwen completions failed (${upstream.status}): ${text.slice(0, 300)}`, upstream.status >= 500 ? 502 : upstream.status);
   }
 
   const completionId = `chatcmpl-qwen-${chatId.slice(0, 8)}`;
