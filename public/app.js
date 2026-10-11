@@ -1474,10 +1474,14 @@ $('#pgForm').onsubmit = async (e) => {
   input.value = '';
   const bubble = pgAddMsg('assistant', '');
   bubble.classList.add('typing');
+  // 90s timeout so a hung upstream doesn't leave the UI stuck forever.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 90000);
   try {
     const r = await api('/api/playground/chat', {
       method: 'POST',
       body: JSON.stringify({ model, messages: pgHistory }),
+      signal: ctrl.signal,
     });
     if (!r.ok) throw new Error((await r.text()).slice(0, 200));
     const reader = r.body.getReader();
@@ -1525,9 +1529,11 @@ $('#pgForm').onsubmit = async (e) => {
   } catch (err) {
     bubble.classList.remove('typing');
     bubble.className = 'msg msg-err';
-    bubble.textContent = '✕ ' + String(err && err.message || err).slice(0, 300);
+    const isTimeout = err && (err.name === 'AbortError' || String(err.message || '').includes('aborted'));
+    bubble.textContent = '✕ ' + (isTimeout ? 'timed out after 90s — the upstream never responded' : String(err && err.message || err).slice(0, 300));
     $('#pgHint').textContent = 'The model failed — check its provider and account before wiring it to external agents.';
   } finally {
+    clearTimeout(timer);
     pgSending = false;
     $('#pgSend').disabled = false;
     $('#pgMsgs').scrollTop = $('#pgMsgs').scrollHeight;
