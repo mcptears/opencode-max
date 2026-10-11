@@ -207,7 +207,9 @@
             </ol>
             <form id="qwenConnectForm" class="form-grid">
               <label>Display name<input name="name" placeholder="e.g. Qwen main"></label>
-              <label>Qwen token <span class="hint">or full Cookie header</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label>Qwen token <span class="hint">from localStorage</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label>Session cookies <span class="hint">(required — token alone won't work)</span><textarea name="cookies" rows="3" placeholder="paste cookies here (document.cookie from chat.qwen.ai)" autocomplete="off" style="font-family:monospace"></textarea></label>
+              <div class="hint">In your browser at chat.qwen.ai: DevTools (F12) → Console → run <code>document.cookie</code> → copy the whole string.</div>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
               <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
