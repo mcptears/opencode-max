@@ -29,11 +29,16 @@ export class Metrics {
   tokensSaved = 0;
   readonly perAccount = new Map<string, number>();
   private readonly events: MetricEvent[] = [];
+  /** Logs-tab cutoff: entries at/before this ts are hidden from /api/logs. */
+  private logsCutoff = 0;
 
   constructor() {
     // Restore recent events so the feed survives restarts.
     try {
       const db = getDb();
+      db.prepare('CREATE TABLE IF NOT EXISTS kv_store (k TEXT PRIMARY KEY, v TEXT)').run();
+      const cutoffRow = db.prepare("SELECT v FROM kv_store WHERE k = 'logs_cutoff'").get() as { v?: string } | undefined;
+      this.logsCutoff = cutoffRow?.v ? Number(cutoffRow.v) || 0 : 0;
       const rows = db
         .prepare('SELECT ts AS t, kind, detail FROM metric_events ORDER BY id DESC LIMIT ?')
         .all(MAX_EVENTS) as unknown as MetricEvent[];
@@ -158,24 +163,25 @@ export class Metrics {
     return this.events.slice(0, limit);
   }
 
-  /** Recent request log rows for the Logs tab, newest first. */
+  /** Recent request log rows for the Logs tab, newest first (respects clear cutoff). */
   recentLogRequests(limit = 100): { ts: number; account_id: string; status: number; latency_ms: number; model: string | null }[] {
     try {
       return getDb()
-        .prepare('SELECT ts, account_id, status, latency_ms, model FROM request_log ORDER BY ts DESC LIMIT ?')
-        .all(limit) as { ts: number; account_id: string; status: number; latency_ms: number; model: string | null }[];
+        .prepare('SELECT ts, account_id, status, latency_ms, model FROM request_log WHERE ts > ? ORDER BY ts DESC LIMIT ?')
+        .all(this.logsCutoff, limit) as { ts: number; account_id: string; status: number; latency_ms: number; model: string | null }[];
     } catch {
       return [];
     }
   }
 
-  /** Clear all events and request logs. */
+  /** Clear the Logs tab feed only — graphs/usage keep their history. */
   clearLogs(): void {
     this.events.length = 0;
+    this.logsCutoff = Date.now();
     try {
       const db = getDb();
       db.prepare('DELETE FROM metric_events').run();
-      db.prepare('DELETE FROM request_log').run();
+      db.prepare("INSERT OR REPLACE INTO kv_store (k, v) VALUES ('logs_cutoff', ?)").run(String(this.logsCutoff));
     } catch {
       /* ignore */
     }
