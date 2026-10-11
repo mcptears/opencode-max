@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -35,10 +36,11 @@ import (
 )
 
 // Aliyun CAPTCHA V3 credentials (same as the GLM-Free-API bridge).
+// These are chat.z.ai's own public web-client credentials, not private secrets.
+// They can also be supplied via ZAI_ALIYUN_ACCESS_KEY / ZAI_ALIYUN_SECRET_KEY
+// env vars (useful when the compiled-in values were redacted by a scanner).
 const (
-	aliyunAccessKey = "3KYV44cZo8KxKMLSMi2qupDaSYD"
-	aliyunSecretKey = "3KYV46zPQDDkDCtremOYpjqTz9P"
-	aliyunSceneID   = "didk33e0"
+	aliyunSceneID = "didk33e0"
 
 	aliyunInitURL   = "https://no8xfe.captcha-open-southeast.aliyuncs.com/"
 	aliyunVerifyURL = "https://no8xfe-verify.captcha-open-southeast.aliyuncs.com/"
@@ -46,6 +48,20 @@ const (
 	argConstant = "4xrihv8zb8tf1mfj"
 	encryptKey  = "3e627e1b4c63f913"
 )
+
+var (
+	aliyunAccessKey = firstNonEmpty(os.Getenv("ZAI_ALIYUN_ACCESS_KEY"), "3KYV44cZo8KxKMLSMi2qupDaSYD")
+	aliyunSecretKey = firstNonEmpty(os.Getenv("ZAI_ALIYUN_SECRET_KEY"), "3KYV46zPQDDkDCtremOYpjqTz9P")
+)
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 var argPermTable = [64]int{
 	32, 50, 10, 51, 6, 44, 37, 16, 46, 11, 62, 19, 43, 25, 23, 30,
