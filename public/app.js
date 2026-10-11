@@ -60,11 +60,13 @@ function accountRows(s, withActions) {
     const editBtn = withActions ? `<button class="btn" data-edit="${esc(a.id)}" style="margin-left:6px">Edit</button>` : '';
     const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
+    const proxyOn = a.useProxy !== false;
+    const proxyCell = `<td><label class="hint" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" data-proxy="${esc(a.id)}"${proxyOn ? ' checked' : ''}> proxy</label></td>`;
     const usageCell = `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span>${a.inflight > 0 ? ` <span class="hint">· ${a.inflight} in flight</span>` : ''}</td>`;
     const latencyCell = `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>`;
     const cells = withActions
-      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>${usageCell}${latencyCell}`
-      : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>${usageCell}`;
+      ? `<td><code>${esc(a.id)}</code></td><td>${esc(a.name)}</td><td>${esc(a.provider)}</td><td>P${a.priority}</td>${proxyCell}${usageCell}${latencyCell}`
+      : `<td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td><td>P${a.priority}</td>${proxyCell}${usageCell}`;
     return `<tr>${cells}
       <td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>
       <td>${fmtMs(a.cooldownEndsInMs)}</td>
@@ -184,7 +186,14 @@ function renderStatus(s) {
   ];
   $('#statCards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 
-  $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="5" class="hint">no accounts configured</td></tr>';
+  $('#accountsTblMini tbody').innerHTML = accountRows(s, false) || '<tr><td colspan="6" class="hint">no accounts configured</td></tr>';
+  $('#accountsTblMini').querySelectorAll('[data-proxy]').forEach((c) => c.onchange = async () => {
+    try {
+      await api(`/api/accounts/${encodeURIComponent(c.dataset.proxy)}`, {
+        method: 'PATCH', body: JSON.stringify({ useProxy: c.checked }),
+      });
+    } catch (err) { c.checked = !c.checked; }
+  });
   renderProviderCards();
 
   $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
@@ -820,6 +829,7 @@ $('#qwenConnectForm').onsubmit = async (e) => {
       body: JSON.stringify({
         id: `qwen-${n}`, name: f.name.value.trim() || `Qwen ${n}`,
         provider: 'qwen', apiKey: credential, priority: Number(f.priority.value) || n,
+        useProxy: !!f.useProxy.checked,
       }),
     });
     if (!r.ok) throw new Error((await r.text()).slice(0, 160));
@@ -961,6 +971,7 @@ $('#dsConnectForm').onsubmit = async (e) => {
       body: JSON.stringify({
         id: `deepseek-${n}`, name: f.name.value.trim() || `DeepSeek ${n}`,
         provider: 'deepseek', apiKey: credential, cookies, priority: Number(f.priority.value) || n,
+        useProxy: !!f.useProxy.checked,
       }),
     });
     if (!r.ok) throw new Error((await r.text()).slice(0, 160));
@@ -1002,6 +1013,7 @@ $('#zaiConnectForm').onsubmit = async (e) => {
       body: JSON.stringify({
         id: `zai-${n}`, name: f.name.value.trim() || `Z.ai ${n}`,
         provider: 'zai', apiKey: credential, priority: Number(f.priority.value) || n,
+        useProxy: !!f.useProxy.checked,
       }),
     });
     if (!r.ok) throw new Error((await r.text()).slice(0, 160));
@@ -1039,8 +1051,10 @@ function providerCardRows(accounts, s) {
     const resetBtn = a.state !== 'active' ? `<button class="btn" data-reset="${esc(a.id)}">Reset</button>` : '';
     const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
+    const proxyOn = a.useProxy !== false;
     return `<tr><td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td>` +
       `<td>P${a.priority}</td>` +
+      `<td><label class="hint" style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" data-proxy="${esc(a.id)}"${proxyOn ? ' checked' : ''}> proxy</label></td>` +
       `<td><span class="${usage >= limit ? 'tag bad' : usage >= limit * 0.9 ? 'tag warn' : ''}">${usage}/${limit}</span></td>` +
       `<td>${a.avgLatencyMs ? a.avgLatencyMs + '<small> ms</small>' : '<span class="hint">—</span>'}</td>` +
       `<td><span class="badge ${a.state}">${a.state.replace('_', ' ')}</span></td>` +
@@ -1231,7 +1245,7 @@ async function showProviderDetail(id) {
     <h4 class="sub">Models <span class="hint">shared by all ${esc(p.name)} accounts</span></h4>
     <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
     <h4 class="sub">Accounts <span class="hint">${accs.length}</span></h4>
-    ${accs.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead>
+    ${accs.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>Proxy</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead>
       <tbody>${providerCardRows(accs, s)}</tbody></table></div></div>`
       : '<div class="hint">no accounts yet — connect one above</div>'}
     <h4 class="sub">Recent requests <span class="hint">24h</span></h4>
@@ -1308,6 +1322,13 @@ async function showProviderDetail(id) {
     refresh(); showProviderDetail(id);
   });
   el.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openAccountEdit(b.dataset.edit));
+  el.querySelectorAll('[data-proxy]').forEach((c) => c.onchange = async () => {
+    try {
+      await api(`/api/accounts/${encodeURIComponent(c.dataset.proxy)}`, {
+        method: 'PATCH', body: JSON.stringify({ useProxy: c.checked }),
+      });
+    } catch (err) { c.checked = !c.checked; }
+  });
 
   showSection('provider', p.name);
 
@@ -1355,6 +1376,7 @@ function openAccountEdit(id) {
   f.cooldownPeriod.value = a.cooldownPeriod ?? '';
   f.baseUrl.value = a.baseUrl ?? '';
   f.quotaLimit.value = a.quotaLimit ?? '';
+  f.useProxy.checked = a.useProxy !== false;
   $('#accountEditMsg').textContent = '';
   $('#accountEditModal').hidden = false;
 }
@@ -1371,6 +1393,7 @@ $('#accountEditForm').onsubmit = async (e) => {
     apiKey: f.apiKey.value,
     clearApiKey: !!f.clearApiKey.checked,
     priority: Number(f.priority.value) || 1,
+    useProxy: !!f.useProxy.checked,
   };
   if (f.cooldownPeriod.value !== '') body.cooldownPeriod = Number(f.cooldownPeriod.value);
   if (f.baseUrl.value.trim() !== '') body.baseUrl = f.baseUrl.value.trim();
