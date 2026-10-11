@@ -63,15 +63,13 @@ export const DEEPSEEK_PRESET: ProviderConfig = {
   id: 'deepseek',
   name: 'DeepSeek (built-in)',
   baseUrl: 'https://chat.deepseek.com',
-  models: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-expert'],
+  models: ['deepseek-chat'],
   enabled: true,
   protocol: 'deepseek-web',
   deepseek: {
     defaultModel: 'deepseek-chat',
     modelMap: {
-      'deepseek-r1': 'deepseek-reasoner',
-      'deepseek-think': 'deepseek-reasoner',
-      'deepseek-pro': 'deepseek-expert',
+      'deepseek-chat': 'deepseek-chat',
     },
   },
 };
