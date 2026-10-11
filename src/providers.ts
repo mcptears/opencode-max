@@ -109,9 +109,6 @@ export const QWEN_PRESET: ProviderConfig = {
       'qwen3.8-omni-flash': 'qwen3.8-omni-flash',
       'qwen3.6-plus': 'qwen3.6-plus',
       'qwen3.5-plus': 'qwen3.5-plus',
-      'qwen-max': 'qwen3.7-max',
-      'qwen-plus': 'qwen3.7-plus',
-      'qwen-flash': 'qwen3.8-omni-flash',
     },
   },
 };
