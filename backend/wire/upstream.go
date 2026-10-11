@@ -248,6 +248,7 @@ func (u *Upstream) forwardDeepSeek(ctx context.Context, ac *types.AccountConfig,
 
 func (u *Upstream) forwardZai(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req openAIRequest, stream bool) (io.ReadCloser, error) {
 	c := zai.NewClient(provider.BaseURL, ac.APIKey, u.HTTP)
+	c.DeviceToken = ac.DeviceToken
 	model := resolveModel(provider, req.Model)
 	raw := make([]struct {
 		Role    string
