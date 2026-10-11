@@ -56,7 +56,7 @@ async function refresh() {
 function accountRows(s, withActions) {
   const globalLimit = s.quota5hLimit || 200;
   return s.accounts.map((a) => {
-    const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}" style="margin-left:6px">Reset</button>` : '';
+    const resetBtn = a.state !== 'active' ? `<button class="btn" data-reset="${esc(a.id)}" style="margin-left:6px">Reset</button>` : '';
     const editBtn = withActions ? `<button class="btn" data-edit="${esc(a.id)}" style="margin-left:6px">Edit</button>` : '';
     const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
@@ -1033,7 +1033,7 @@ function providerModelList(p) {
 function providerCardRows(accounts, s) {
   const globalLimit = s.quota5hLimit || 200;
   return accounts.map((a) => {
-    const resetBtn = a.state === 'invalid' ? `<button class="btn" data-reset="${esc(a.id)}">Reset</button>` : '';
+    const resetBtn = a.state !== 'active' ? `<button class="btn" data-reset="${esc(a.id)}">Reset</button>` : '';
     const limit = a.quotaLimit || globalLimit;
     const usage = a.usage5h || 0;
     return `<tr><td><code>${esc(a.id)}</code><div class="hint">${esc(a.name)}</div></td>` +
