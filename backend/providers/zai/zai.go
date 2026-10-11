@@ -455,57 +455,103 @@ func FlattenMessages(messages []struct {
 }
 
 type chatBody struct {
-	Model           string         `json:"model"`
-	ChatID          string         `json:"chat_id"`
-	Messages        []ChatMessage  `json:"messages"`
-	SignaturePrompt string         `json:"signature_prompt"`
-	Stream          bool           `json:"stream"`
-	Params          map[string]any `json:"params"`
-	Extra           map[string]any `json:"extra"`
-	Features        map[string]any `json:"features"`
-	Variables       map[string]any `json:"variables"`
-	BackgroundTasks map[string]any `json:"background_tasks"`
+	Model              string         `json:"model"`
+	ChatID             string         `json:"chat_id"`
+	Messages           []ChatMessage  `json:"messages"`
+	SignaturePrompt    string         `json:"signature_prompt"`
+	Stream             bool           `json:"stream"`
+	CaptchaVerifyParam string         `json:"captcha_verify_param"`
+	Features           map[string]any `json:"features"`
 }
 
-func (c *Client) buildBody(model string, id *Identity, messages []ChatMessage, prompt string, thinkingEnabled, searchEnabled bool) *chatBody {
-	userName := "User"
-	if id.Email != "" {
-		if i := strings.Index(id.Email, "@"); i > 0 {
-			userName = id.Email[:i]
-		}
-	}
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+func (c *Client) buildBody(model string, messages []ChatMessage, prompt string, thinkingEnabled, searchEnabled bool) *chatBody {
 	return &chatBody{
-		Model:           model,
-		ChatID:          newUUID(),
-		Messages:        messages,
-		SignaturePrompt: prompt,
-		Stream:          true,
-		Params:          map[string]any{},
-		Extra:           map[string]any{},
+		Model:              model,
+		ChatID:             newUUID(),
+		Messages:           messages,
+		SignaturePrompt:    prompt,
+		Stream:             true,
+		CaptchaVerifyParam: "",
 		Features: map[string]any{
-			"enable_thinking": thinkingEnabled,
-			"web_search":      searchEnabled,
-			"auto_web_search": searchEnabled,
+			"enable_thinking":  thinkingEnabled,
+			"web_search":       false,
+			"auto_web_search":  searchEnabled,
 			"image_generation": false,
-			"preview_mode":    false,
-			"flags":           []any{},
+			"flags":            []any{},
 		},
-		Variables: map[string]any{
-			"{{USER_NAME}}":      userName,
-			"{{USER_LOCATION}}":  "Unknown",
-			"{{CURRENT_DATETIME}}": now,
-			"{{USER_LANGUAGE}}":  "en-US",
-		},
-		BackgroundTasks: map[string]any{"title_generation": true, "tags_generation": true},
 	}
 }
 
 // postChat sends one signed chat turn and returns the raw SSE response body.
+// On 401 it re-validates the credential and retries once.
 func (c *Client) postChat(ctx context.Context, model string, messages []ChatMessage, thinkingEnabled, searchEnabled bool) (io.ReadCloser, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		body, chatID, err := c.postChatOnce(ctx, model, messages, thinkingEnabled, searchEnabled)
+		if err == nil {
+			return &deletingBody{ReadCloser: body, client: c, chatID: chatID}, nil
+		}
+		if we, ok := err.(*WebError); ok && we.Status == 401 && attempt == 0 {
+			// Token may have expired — re-validate and retry once.
+			if _, verr := c.ValidateCredential(ctx); verr != nil {
+				return nil, err
+			}
+			continue
+		}
+		return nil, err
+	}
+	return nil, webErrorf(401, "z.ai token rejected — reconnect the account")
+}
+
+// deletingBody deletes the Z.ai chat session when the response body closes.
+type deletingBody struct {
+	io.ReadCloser
+	client *Client
+	chatID string
+	done   bool
+}
+
+func (d *deletingBody) Close() error {
+	err := d.ReadCloser.Close()
+	if !d.done {
+		d.done = true
+		d.client.deleteChat(context.Background(), d.chatID)
+	}
+	return err
+}
+
+// deleteChat removes a chat session from Z.ai (idempotent — "not found" counts as success).
+func (c *Client) deleteChat(ctx context.Context, chatID string) {
+	if chatID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/api/v1/chats/"+chatID, nil)
+	if err != nil {
+		return
+	}
+	req.Header = c.authHeaders()
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	resp.Body.Close()
+}
+
+// isWAFBlock reports whether a response looks like the Aliyun WAF block page.
+func isWAFBlock(status int, body []byte) bool {
+	if status != 405 {
+		return false
+	}
+	s := strings.ToLower(string(body))
+	return strings.Contains(s, "aliyun") || strings.Contains(s, "waf") || strings.Contains(s, "block")
+}
+
+func (c *Client) postChatOnce(ctx context.Context, model string, messages []ChatMessage, thinkingEnabled, searchEnabled bool) (io.ReadCloser, string, error) {
 	id := DecodeToken(c.Credential)
 	if id == nil {
-		return nil, webErrorf(401, "invalid Z.ai token")
+		return nil, "", webErrorf(401, "invalid Z.ai token")
 	}
 	var prompt string
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -515,26 +561,31 @@ func (c *Client) postChat(ctx context.Context, model string, messages []ChatMess
 		}
 	}
 	sig := SignRequest(prompt, strings.TrimSpace(c.Credential), id.ID, c.SaltKey)
-	body, _ := json.Marshal(c.buildBody(model, id, messages, prompt, thinkingEnabled, searchEnabled))
+	chatBody := c.buildBody(model, messages, prompt, thinkingEnabled, searchEnabled)
+	body, _ := json.Marshal(chatBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v2/chat/completions?"+sig.Query, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	h := c.authHeaders()
 	h.Set("X-Signature", sig.Signature)
 	h.Set("X-Fe-Version", c.FEVersion)
+	h.Set("X-Region", "overseas")
 	req.Header = h
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, &WebError{Msg: err.Error(), Status: 502}
+		return nil, "", &WebError{Msg: err.Error(), Status: 502}
 	}
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		resp.Body.Close()
-		return nil, webErrorf(401, "z.ai token rejected — reconnect the account")
+		return nil, "", webErrorf(401, "z.ai token rejected — reconnect the account")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
+		if isWAFBlock(resp.StatusCode, b) {
+			return nil, "", webErrorf(429, "z.ai WAF block — egress IP flagged, retry later")
+		}
 		suffix := ""
 		if len(b) > 0 {
 			s := string(b)
@@ -543,9 +594,9 @@ func (c *Client) postChat(ctx context.Context, model string, messages []ChatMess
 			}
 			suffix = ": " + s
 		}
-		return nil, webErrorf(resp.StatusCode, "z.ai chat failed (%d)%s", resp.StatusCode, suffix)
+		return nil, "", webErrorf(resp.StatusCode, "z.ai chat failed (%d)%s", resp.StatusCode, suffix)
 	}
-	return resp.Body, nil
+	return resp.Body, chatBody.ChatID, nil
 }
 
 // ssePump reads SSE data lines from r, calling fn for each payload.
