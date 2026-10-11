@@ -228,6 +228,14 @@ async function renderLogs() {
   } catch { /* ignore */ }
 }
 
+$('#clearLogsBtn').onclick = async () => {
+  if (!confirm('Clear all logs (requests + events)?')) return;
+  try {
+    await api('/api/logs', { method: 'DELETE' });
+    renderLogs();
+  } catch { /* ignore */ }
+};
+
 async function loadProxies() {
   try {
     const d = await (await api('/api/proxies')).json();
