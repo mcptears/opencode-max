@@ -187,7 +187,7 @@ Z.ai runs **natively inside opencode-max** — it speaks `chat.z.ai`'s web API d
 1. In the dashboard, hit **Add Z.ai provider** (or `POST /api/providers/preset/zai`).
 2. Hit **Connect Z.ai account**:
    - Sign in at `chat.z.ai` in your own browser — solve the captcha there (one time).
-   - Copy the token: DevTools (F12) → Application → Local Storage → `https://chat.z.ai` → `token`.
+   - Copy the token: DevTools (F12) → Console → run `localStorage.getItem("token")`, copy the value.
    - Paste it in the dashboard — it's validated live before anything is saved. No password is ever involved.
 3. Ask for a GLM model — `glm-5`, `glm-4.7`, `glm-4.5`, … — and it routes there, with the same proxy rotation, retries, quota tracking and session handling as Zen.
 
