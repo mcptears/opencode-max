@@ -152,15 +152,11 @@ async function headers(credential: string, cookies?: string): Promise<Record<str
     'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
   };
-  const cred = credential?.trim();
-  if (cred) {
-    // Logged-in: user credential only (baxia is for guest/WAF bypass).
-    Object.assign(h, qwenAuthHeaders(cred));
-  } else {
-    // Guest: baxia tokens only.
-    const baxia = await qwenBaxiaHeaders();
-    if (baxia['bx-umidtoken']) Object.assign(h, baxia);
-  }
+  // Baxia always (WAF bypass) — proven working in guest mode.
+  const baxia = await qwenBaxiaHeaders();
+  if (baxia['bx-umidtoken']) Object.assign(h, baxia);
+  // Logged-in: cookies authenticate the account. The localStorage token is a
+  // UI token, not an API credential — don't send it as Bearer.
   if (cookies?.trim()) h['cookie'] = cookies.trim();
   return h;
 }
