@@ -257,6 +257,9 @@ func TestValidateCredential(t *testing.T) {
 	srv := mockZai(t, "", nil)
 	defer srv.Close()
 	c := NewClient(srv.URL, makeTestToken(t, "user-123", "test@example.com"), srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	id, err := c.ValidateCredential(context.Background())
 	if err != nil {
 		t.Fatalf("ValidateCredential: %v", err)
@@ -270,6 +273,9 @@ func TestValidateCredentialRejected(t *testing.T) {
 	srv := mockZai(t, "", nil)
 	defer srv.Close()
 	c := NewClient(srv.URL, "not-a-jwt", srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	_, err := c.ValidateCredential(context.Background())
 	// The mock returns 401 for missing Bearer prefix... "not-a-jwt" IS sent as
 	// Bearer, so the mock returns 200 but DecodeToken fails -> 401 WebError.
@@ -283,6 +289,9 @@ func TestScrapeConfig(t *testing.T) {
 	srv := mockZai(t, "", nil)
 	defer srv.Close()
 	c := NewClient(srv.URL, "tok", srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	c.ScrapeConfig(context.Background())
 	if c.FEVersion != "prod-fe-1.0.190" {
 		t.Fatalf("fe version = %q", c.FEVersion)
@@ -293,6 +302,9 @@ func TestListModels(t *testing.T) {
 	srv := mockZai(t, "", nil)
 	defer srv.Close()
 	c := NewClient(srv.URL, makeTestToken(t, "u", "e@x.y"), srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	models := c.ListModels(context.Background())
 	if len(models) != 2 || models[0] != "glm-5.3-flash" {
 		t.Fatalf("models = %v", models)
@@ -328,6 +340,9 @@ func TestChatNonStream(t *testing.T) {
 	})
 	defer srv.Close()
 	c := NewClient(srv.URL, makeTestToken(t, "user-123", "test@example.com"), srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	thinking, answer, err := c.Chat(ctx, "glm-5.3-flash",
@@ -353,6 +368,9 @@ func TestChatCompletionNonStream(t *testing.T) {
 	srv := mockZai(t, zaiTestSSE, nil)
 	defer srv.Close()
 	c := NewClient(srv.URL, makeTestToken(t, "user-123", "test@example.com"), srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	res, err := c.ChatCompletion(ctx, []struct {
@@ -395,6 +413,9 @@ func TestChatCompletionStream(t *testing.T) {
 	srv := mockZai(t, zaiTestSSE, nil)
 	defer srv.Close()
 	c := NewClient(srv.URL, makeTestToken(t, "user-123", "test@example.com"), srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	res, err := c.ChatCompletion(ctx, []struct {
@@ -428,6 +449,9 @@ func TestChatCompletionStream(t *testing.T) {
 
 func TestChatCompletionEmpty(t *testing.T) {
 	c := NewClient("http://127.0.0.1:1", makeTestToken(t, "u", "e@x.y"), nil)
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	_, err := c.ChatCompletion(context.Background(), []struct {
 		Role    string
 		Content string
@@ -503,6 +527,9 @@ func TestGLMFreeAPIMethod(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, token, srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
 	ctx := context.Background()
 	thinking, answer, err := c.Chat(ctx, "glm-5.3-flash",
 		[]ChatMessage{{Role: "user", Content: "hello"}}, true, false)
@@ -558,5 +585,75 @@ func TestGLMFreeAPIMethod(t *testing.T) {
 	}
 	if !strings.HasPrefix(deleteCalls[0], "/api/v1/chats/") {
 		t.Fatalf("delete path = %q", deleteCalls[0])
+	}
+}
+
+func TestCaptchaParamSent(t *testing.T) {
+	// The captcha_verify_param must carry the generated value, not empty.
+	var gotParam string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v2/chat/completions") {
+			b, _ := io.ReadAll(r.Body)
+			var body map[string]any
+			_ = json.Unmarshal(b, &body)
+			gotParam, _ = body["captcha_verify_param"].(string)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"data\":{\"phase\":\"done\"}}\n\n"))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/chats/") {
+			w.WriteHeader(200)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, makeTestToken(t, "u", "e@x.y"), srv.Client())
+	c.DeviceToken = "test-device-token"
+	captchaComputeOverride = "test-captcha-param"
+	defer func() { captchaComputeOverride = "" }()
+	c.DeviceToken = "dev-token"
+	captchaComputeOverride = "generated-param-123"
+	defer func() { captchaComputeOverride = "" }()
+
+	_, _, err := c.Chat(context.Background(), "glm-5.3-flash",
+		[]ChatMessage{{Role: "user", Content: "hi"}}, true, false)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if gotParam != "generated-param-123" {
+		t.Fatalf("captcha_verify_param = %q, want generated value", gotParam)
+	}
+}
+
+func TestCaptchaMissingDeviceToken(t *testing.T) {
+	// No device token → clear 429-style error, no request sent.
+	c := NewClient("http://127.0.0.1:1", makeTestToken(t, "u", "e@x.y"), nil)
+	// No device token and no override → must fail before any request.
+	_, _, err := c.Chat(context.Background(), "glm-5.3-flash",
+		[]ChatMessage{{Role: "user", Content: "hi"}}, true, false)
+	if err == nil {
+		t.Fatal("expected error without device token")
+	}
+	we, ok := err.(*WebError)
+	if !ok || we.Status != 429 {
+		t.Fatalf("err = %v, want WebError 429", err)
+	}
+}
+
+func TestCaptchaCryptoDeterministic(t *testing.T) {
+	// Pure functions must be deterministic.
+	a1, a2 := generateArg("test-certify-id"), generateArg("test-certify-id")
+	if a1 != a2 || a1 == "" {
+		t.Fatal("generateArg not deterministic")
+	}
+	h1, h2 := aliHash("hello", "0000"), aliHash("hello", "0000")
+	if h1 != h2 || len(h1) != 32 {
+		t.Fatalf("aliHash = %q", h1)
+	}
+	e1, e2 := captchaEncrypt([]byte("data")), captchaEncrypt([]byte("data"))
+	if e1 != e2 || e1 == "" {
+		t.Fatal("captchaEncrypt not deterministic")
 	}
 }
