@@ -33,6 +33,8 @@ export interface QwenWebRequest {
   baseUrl: string;
   /** localStorage token or Cookie header value from chat.qwen.ai. */
   credential: string;
+  /** Session cookies from chat.qwen.ai (document.cookie) — sent as Cookie header. */
+  cookies?: string;
   /** Resolved Qwen web model id, e.g. "qwen3.7-plus". */
   model: string;
   /** OpenAI-format messages; flattened into one prompt (disposable chats). */
@@ -69,8 +71,8 @@ export function qwenAuthHeaders(credential: string): Record<string, string> {
   return { authorization: `Bearer ${c}` };
 }
 
-function headers(credential: string): Record<string, string> {
-  return {
+function headers(credential: string, cookies?: string): Record<string, string> {
+  const h: Record<string, string> = {
     ...qwenAuthHeaders(credential),
     'content-type': 'application/json',
     source: 'web',
@@ -78,6 +80,8 @@ function headers(credential: string): Record<string, string> {
     'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
   };
+  if (cookies?.trim()) h['cookie'] = cookies.trim();
+  return h;
 }
 
 function textContent(content: unknown): string {
@@ -109,10 +113,10 @@ interface FetchOpts {
   dispatcher?: unknown;
 }
 
-async function qwenFetch(baseUrl: string, credential: string, path: string, init: RequestInit, opts: FetchOpts): Promise<Response> {
+async function qwenFetch(baseUrl: string, credential: string, path: string, init: RequestInit, opts: FetchOpts, cookies?: string): Promise<Response> {
   return fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
     ...init,
-    headers: { ...headers(credential), ...init.headers },
+    headers: { ...headers(credential, cookies), ...init.headers },
     signal: opts.signal,
     dispatcher: opts.dispatcher,
   } as RequestInit & { dispatcher?: unknown });
@@ -202,9 +206,10 @@ export async function validateQwenCredential(
   baseUrl: string,
   credential: string,
   opts: FetchOpts = {},
+  cookies?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const r = await qwenFetch(baseUrl, credential, '/api/v2/chats/?page=1&exclude_project=true', { method: 'GET' }, opts);
+    const r = await qwenFetch(baseUrl, credential, '/api/v2/chats/?page=1&exclude_project=true', { method: 'GET' }, opts, cookies);
     if (r.status === 401 || r.status === 403) return { ok: false, error: 'token rejected (401/403) — sign in again and paste a fresh token' };
     if (!r.ok) return { ok: false, error: `qwen web api returned ${r.status}` };
     return { ok: true };
@@ -213,7 +218,7 @@ export async function validateQwenCredential(
   }
 }
 
-async function createChat(baseUrl: string, credential: string, model: string, opts: FetchOpts): Promise<string> {
+async function createChat(baseUrl: string, credential: string, model: string, opts: FetchOpts, cookies?: string): Promise<string> {
   const r = await qwenFetch(
     baseUrl,
     credential,
@@ -223,6 +228,7 @@ async function createChat(baseUrl: string, credential: string, model: string, op
       body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: 'normal', chat_type: 't2t', timestamp: Date.now() }),
     },
     opts,
+    cookies,
   );
   if (r.status === 401 || r.status === 403) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
   if (!r.ok) throw new QwenWebError(`qwen create-chat failed (${r.status})`, r.status >= 500 ? 502 : r.status);
@@ -233,9 +239,9 @@ async function createChat(baseUrl: string, credential: string, model: string, op
 }
 
 /** Best-effort cleanup of the disposable chat; never throws. */
-async function deleteChat(baseUrl: string, credential: string, chatId: string, opts: FetchOpts): Promise<void> {
+async function deleteChat(baseUrl: string, credential: string, chatId: string, opts: FetchOpts, cookies?: string): Promise<void> {
   try {
-    await qwenFetch(baseUrl, credential, `/api/v2/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' }, opts);
+    await qwenFetch(baseUrl, credential, `/api/v2/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' }, opts, cookies);
   } catch {
     /* ignore — chats are disposable */
   }
@@ -288,7 +294,7 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
   const prompt = flattenMessages(req.messages);
   if (!prompt) throw new QwenWebError('empty prompt', 400);
   const opts: FetchOpts = { signal: req.signal, dispatcher: req.dispatcher };
-  const chatId = await createChat(req.baseUrl, req.credential, req.model, opts);
+  const chatId = await createChat(req.baseUrl, req.credential, req.model, opts, req.cookies);
 
   const fid = crypto.randomUUID();
   let upstream: Response;
@@ -332,9 +338,10 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
         }),
       },
       opts,
+      req.cookies,
     );
   } catch (e) {
-    void deleteChat(req.baseUrl, req.credential, chatId, opts);
+    void deleteChat(req.baseUrl, req.credential, chatId, opts, req.cookies);
     throw e;
   }
 
