@@ -8,7 +8,7 @@
  *         Application -> Local Storage -> "token". opencode-max never sees a
  *         password. Validate with GET /api/v1/auths/ (Bearer token).
  *         The JWT payload carries {id, email}; the id signs every request.
- *   Chat turn: POST /api/chat/completions?<signed query>
+ *   Chat turn: POST /api/v2/chat/completions?<signed query>
  *         Headers: Authorization: Bearer <token>, X-Signature, X-FE-Version.
  *         The signature is an HMAC chain: bucket = floor(ts_ms / 300000),
  *         w_key = HMAC_SHA256(salt_key, bucket),
@@ -375,7 +375,7 @@ export async function zaiChat(
   try {
     r = await zaiFetch(
       baseUrl,
-      `/api/chat/completions?${sig.query}`,
+      `/api/v2/chat/completions?${sig.query}`,
       {
         method: 'POST',
         headers: { ...authHeaders(token), 'x-signature': sig.signature, 'x-fe-version': feVersion },
@@ -555,7 +555,7 @@ export async function zaiChatCompletion(req: ZaiWebRequest): Promise<ReadableStr
   try {
     upstream = await zaiFetch(
       req.baseUrl,
-      `/api/chat/completions?${sig.query}`,
+      `/api/v2/chat/completions?${sig.query}`,
       {
         method: 'POST',
         headers: {
