@@ -85,11 +85,9 @@ export const ZAI_PRESET: ProviderConfig = {
   enabled: true,
   protocol: 'zai-web',
   zai: {
-    defaultModel: 'glm-5',
+    defaultModel: 'glm-5.3-flash',
     modelMap: {
-      'glm-4.7': 'glm-4.7',
-      'glm-4.5': 'glm-4.5',
-      'glm-5-flash': 'glm-5-flash',
+      'glm-5.3-flash': 'glm-5.3-flash',
       'glm-5.3': 'glm-5.3',
       'glm-5.2': 'glm-5.2',
     },
