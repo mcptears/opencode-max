@@ -9,6 +9,8 @@ export interface AccountConfig {
   apiKey: string;
   /** 1 = highest priority. Lower-priority accounts are used when higher ones cool down. */
   priority: number;
+  /** Optional session cookies (e.g. DeepSeek web chat needs these + the token). */
+  cookies?: string;
   /** ms the account stays parked after a 429/quota hit (default DEFAULT_COOLDOWN_MS). */
   cooldownPeriod?: number;
   /** Optional per-account upstream override (defaults to UPSTREAM_BASE). */
