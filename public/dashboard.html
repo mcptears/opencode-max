@@ -15,6 +15,7 @@
       <button data-sec="overview" class="active"><span class="ic">📊</span>Overview</button>
       <button data-sec="accounts"><span class="ic">🔑</span>Accounts</button>
       <button data-sec="providers"><span class="ic">🔌</span>Providers</button>
+      <button data-sec="playground"><span class="ic">💬</span>Playground</button>
       <button data-sec="proxies"><span class="ic">🌐</span>Proxies</button>
       <button data-sec="settings"><span class="ic">⚙️</span>Settings</button>
       <button data-sec="events"><span class="ic">📝</span>Events</button>
@@ -95,6 +96,82 @@
             <button class="btn primary" type="submit">Save changes</button>
           </form>
           <div id="accountEditMsg" class="hint"></div>
+        </div>
+      </div>
+
+      <div class="modal-backdrop" id="addProviderModal" hidden>
+        <div class="modal wide">
+          <div class="modal-head"><h3>Add provider</h3><button class="btn" id="addProviderClose">✕</button></div>
+          <div style="display:flex;gap:8px;margin:4px 0 12px">
+            <button class="tab on" data-aptab="builtin">Built-in</button>
+            <button class="tab" data-aptab="custom">Custom</button>
+          </div>
+          <div id="aptab-builtin">
+            <div class="builtin-grid">
+              <div class="builtin-card">
+                <h4>Qwen <span class="tag">qwen-web</span></h4>
+                <p class="hint">Free Qwen chat, runs natively inside opencode-max — no separate deployment.</p>
+                <div class="row-btns">
+                  <button class="btn primary" id="apQwenPreset">Add provider</button>
+                  <button class="btn" id="apQwenConnect">Connect account</button>
+                </div>
+              </div>
+              <div class="builtin-card">
+                <h4>DeepSeek <span class="tag">deepseek-web</span></h4>
+                <p class="hint">Free DeepSeek chat, runs natively inside opencode-max — no separate deployment.</p>
+                <div class="row-btns">
+                  <button class="btn primary" id="apDsPreset">Add provider</button>
+                  <button class="btn" id="apDsConnect">Connect account</button>
+                </div>
+              </div>
+              <div class="builtin-card">
+                <h4>Z.ai <span class="tag">zai-web</span></h4>
+                <p class="hint">Free GLM chat, runs natively inside opencode-max — no separate deployment.</p>
+                <div class="row-btns">
+                  <button class="btn primary" id="apZaiPreset">Add provider</button>
+                  <button class="btn" id="apZaiConnect">Connect account</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="aptab-custom" hidden>
+            <form id="providerForm" class="form-grid">
+              <label>ID<input name="id" placeholder="e.g. qwen" required pattern="[A-Za-z0-9][A-Za-z0-9-_]*"></label>
+              <label>Display name<input name="name" placeholder="e.g. Qwen"></label>
+              <label style="grid-column:span 2">Base URL<input name="baseUrl" placeholder="e.g. https://api.example.com/v1" required></label>
+              <label style="grid-column:span 2">Model globs, comma-separated<input name="models" placeholder="e.g. qwen*"></label>
+              <label>Protocol
+                <select name="protocol" id="providerProtocol">
+                  <option value="openai">OpenAI-compatible</option>
+                  <option value="qwen-web">Qwen web (built-in)</option>
+                  <option value="deepseek-web">DeepSeek web (built-in)</option>
+                  <option value="zai-web">Z.ai web (built-in)</option>
+                </select>
+              </label>
+              <div id="qwenOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+                <input name="qwenDefaultModel" placeholder="Qwen web model id · e.g. qwen3.7-plus">
+                <textarea name="qwenModelMap" rows="2" placeholder='model map JSON · e.g. {"qwen-max": "qwen3.7-max"}' spellcheck="false"></textarea>
+              </div>
+              <div id="dsOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+                <input name="dsDefaultModel" placeholder="DeepSeek web model id · e.g. deepseek-chat">
+                <textarea name="dsModelMap" rows="2" placeholder='model map JSON · e.g. {"ds-r1": "deepseek-reasoner"}' spellcheck="false"></textarea>
+                <div class="row-btns">
+                  <label class="check"><input type="checkbox" name="dsThinking"> DeepThink <span class="hint">reasoning on by default</span></label>
+                  <label class="check"><input type="checkbox" name="dsSearch"> Web search <span class="hint">search on by default</span></label>
+                </div>
+              </div>
+              <div id="zaiOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+                <input name="zaiDefaultModel" placeholder="Z.ai web model id · e.g. glm-5">
+                <textarea name="zaiModelMap" rows="2" placeholder='model map JSON · e.g. {"glm-fast": "glm-5-flash"}' spellcheck="false"></textarea>
+                <div class="row-btns">
+                  <label class="check"><input type="checkbox" name="zaiThinking" checked> Thinking <span class="hint">reasoning on by default</span></label>
+                  <label class="check"><input type="checkbox" name="zaiSearch"> Web search <span class="hint">search on by default</span></label>
+                </div>
+              </div>
+              <button class="btn primary" type="submit">Add provider</button>
+            </form>
+          </div>
+          <div id="providerMsg" class="hint"></div>
         </div>
       </div>
 
@@ -225,63 +302,35 @@
 
       <section id="sec-providers" class="sec">
         <div class="panel">
-          <div class="panel-head"><h3>Providers</h3><span class="hint">OpenAI-compatible upstreams — requests route by model name</span></div>
+          <div class="panel-head">
+            <h3>Providers</h3>
+            <span class="row-btns">
+              <span class="hint">OpenAI-compatible upstreams — requests route by model name</span>
+              <button class="btn primary" id="addProviderBtn">+ Add provider</button>
+            </span>
+          </div>
           <ul class="plist" id="providerUpList"></ul>
-          <h4 class="sub">Add provider</h4>
-          <form id="providerForm" class="form-grid">
-            <input name="id" placeholder="id · e.g. qwen" required pattern="[A-Za-z0-9][A-Za-z0-9-_]*">
-            <input name="name" placeholder="display name · e.g. Qwen">
-            <input name="baseUrl" placeholder="base URL · e.g. https://api.example.com/v1" required style="grid-column:span 2">
-            <input name="models" placeholder="model globs, comma-separated · e.g. qwen*" style="grid-column:span 2">
-            <label>Protocol
-              <select name="protocol" id="providerProtocol">
-                <option value="openai">OpenAI-compatible</option>
-                <option value="qwen-web">Qwen web (built-in)</option>
-                <option value="deepseek-web">DeepSeek web (built-in)</option>
-                <option value="zai-web">Z.ai web (built-in)</option>
-              </select>
-            </label>
-            <div id="qwenOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
-              <input name="qwenDefaultModel" placeholder="Qwen web model id · e.g. qwen3.7-plus">
-              <textarea name="qwenModelMap" rows="2" placeholder='model map JSON · e.g. {"qwen-max": "qwen3.7-max"}' spellcheck="false"></textarea>
-            </div>
-            <div id="dsOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
-              <input name="dsDefaultModel" placeholder="DeepSeek web model id · e.g. deepseek-chat">
-              <textarea name="dsModelMap" rows="2" placeholder='model map JSON · e.g. {"ds-r1": "deepseek-reasoner"}' spellcheck="false"></textarea>
-              <div class="row-btns">
-                <label class="check"><input type="checkbox" name="dsThinking"> DeepThink <span class="hint">reasoning on by default</span></label>
-                <label class="check"><input type="checkbox" name="dsSearch"> Web search <span class="hint">search on by default</span></label>
-              </div>
-            </div>
-            <div id="zaiOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
-              <input name="zaiDefaultModel" placeholder="Z.ai web model id · e.g. glm-5">
-              <textarea name="zaiModelMap" rows="2" placeholder='model map JSON · e.g. {"glm-fast": "glm-5-flash"}' spellcheck="false"></textarea>
-              <div class="row-btns">
-                <label class="check"><input type="checkbox" name="zaiThinking" checked> Thinking <span class="hint">reasoning on by default</span></label>
-                <label class="check"><input type="checkbox" name="zaiSearch"> Web search <span class="hint">search on by default</span></label>
-              </div>
-            </div>
-            <button class="btn primary" type="submit">Add provider</button>
+        </div>
+      </section>
+
+      <section id="sec-playground" class="sec">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Playground</h3>
+            <span class="hint">chat with a connected model to verify it before wiring it to external agents</span>
+          </div>
+          <div class="pg-bar">
+            <select id="pgModel" class="pg-model"></select>
+            <button class="btn" id="pgNew">New chat</button>
+          </div>
+          <div id="pgMsgs" class="pg-msgs">
+            <div class="pg-empty">Pick a model and say hello — verify it answers before wiring it to external agents.</div>
+          </div>
+          <form id="pgForm" class="pg-form">
+            <textarea id="pgInput" rows="2" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
+            <button class="btn primary" type="submit" id="pgSend">Send</button>
           </form>
-          <h4 class="sub">Qwen (built-in) <span class="hint">free Qwen chat — no separate deployment</span></h4>
-          <p class="hint">Qwen runs natively inside opencode-max. Add the provider, then connect your Qwen account — paste the token from <code>chat.qwen.ai</code> (DevTools console: <code>localStorage.getItem("token")</code>).</p>
-          <div class="connect-row">
-            <button class="btn primary" id="qwenPresetBtn">Add Qwen provider</button>
-            <button class="btn" id="qwenConnectBtn">Connect Qwen account</button>
-          </div>
-          <h4 class="sub">DeepSeek (built-in) <span class="hint">free DeepSeek chat — no separate deployment</span></h4>
-          <p class="hint">DeepSeek runs natively inside opencode-max. Add the provider, then connect your DeepSeek account — sign in with email + password, or paste the token from <code>chat.deepseek.com</code> (DevTools console: <code>JSON.parse(localStorage.getItem("userToken")).value</code>).</p>
-          <div class="connect-row">
-            <button class="btn primary" id="dsPresetBtn">Add DeepSeek provider</button>
-            <button class="btn" id="dsConnectBtn">Connect DeepSeek account</button>
-          </div>
-          <h4 class="sub">Z.ai (built-in) <span class="hint">free GLM chat — no separate deployment</span></h4>
-          <p class="hint">Z.ai runs natively inside opencode-max. Add the provider, then connect your Z.ai account — sign in at <code>chat.z.ai</code> in your browser (solve the captcha there once), then paste the token from DevTools → Application → Local Storage → <code>token</code>.</p>
-          <div class="connect-row">
-            <button class="btn primary" id="zaiPresetBtn">Add Z.ai provider</button>
-            <button class="btn" id="zaiConnectBtn">Connect Z.ai account</button>
-          </div>
-          <div id="providerMsg" class="hint"></div>
+          <div id="pgHint" class="hint"></div>
         </div>
       </section>
 
@@ -332,7 +381,7 @@
             <h4 class="sub">Providers</h4>
             <ul class="plist" id="providerList"></ul>
             <h4 class="sub">Add provider</h4>
-            <form id="providerForm" class="form-grid">
+            <form id="proxyProviderForm" class="form-grid">
               <input name="name" placeholder="name · e.g. My list" required>
               <input name="url" placeholder="https://… (text list or GeoNode JSON)" required style="grid-column:span 2">
               <select name="format">
