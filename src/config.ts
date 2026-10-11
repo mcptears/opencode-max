@@ -11,6 +11,8 @@ export interface AccountConfig {
   priority: number;
   /** Optional session cookies (e.g. DeepSeek web chat needs these + the token). */
   cookies?: string;
+  /** When false, this account connects directly without a proxy. Defaults to true. */
+  useProxy?: boolean;
   /** ms the account stays parked after a 429/quota hit (default DEFAULT_COOLDOWN_MS). */
   cooldownPeriod?: number;
   /** Optional per-account upstream override (defaults to UPSTREAM_BASE). */
