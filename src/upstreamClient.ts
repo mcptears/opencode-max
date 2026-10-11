@@ -475,6 +475,7 @@ export class UpstreamClient {
       const stream = await deepseekChatCompletion({
         baseUrl: base,
         credential: account.apiKey,
+        cookies: account.cookies,
         model: dsModel,
         messages: Array.isArray(parsed.messages) ? parsed.messages : [],
         stream: parsed.stream !== false,
