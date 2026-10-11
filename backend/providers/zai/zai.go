@@ -75,13 +75,16 @@ func webErrorf(status int, format string, args ...any) *WebError {
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
 // Client is a Z.ai web API client. Credential is the JWT from
-// chat.z.ai localStorage ("token").
+// chat.z.ai localStorage ("token"). DeviceToken is the Aliyun device
+// fingerprint (window.z_um.getToken() in the browser at chat.z.ai) used to
+// generate captcha_verify_param for each request.
 type Client struct {
-	BaseURL    string
-	Credential string
-	HTTP       *http.Client
-	SaltKey    string
-	FEVersion  string
+	BaseURL     string
+	Credential  string
+	DeviceToken string
+	HTTP        *http.Client
+	SaltKey     string
+	FEVersion   string
 }
 
 // NewClient builds a Client. A nil httpClient gets a default with a 2-minute timeout.
@@ -464,14 +467,14 @@ type chatBody struct {
 	Features           map[string]any `json:"features"`
 }
 
-func (c *Client) buildBody(model string, messages []ChatMessage, prompt string, thinkingEnabled, searchEnabled bool) *chatBody {
+func (c *Client) buildBody(model string, messages []ChatMessage, prompt string, thinkingEnabled, searchEnabled bool, captchaParam string) *chatBody {
 	return &chatBody{
 		Model:              model,
 		ChatID:             newUUID(),
 		Messages:           messages,
 		SignaturePrompt:    prompt,
 		Stream:             true,
-		CaptchaVerifyParam: "",
+		CaptchaVerifyParam: captchaParam,
 		Features: map[string]any{
 			"enable_thinking":  thinkingEnabled,
 			"web_search":       false,
@@ -561,7 +564,13 @@ func (c *Client) postChatOnce(ctx context.Context, model string, messages []Chat
 		}
 	}
 	sig := SignRequest(prompt, strings.TrimSpace(c.Credential), id.ID, c.SaltKey)
-	chatBody := c.buildBody(model, messages, prompt, thinkingEnabled, searchEnabled)
+	// captcha_verify_param is required — generated via the Aliyun flow
+	// using the account's device token (same method as GLM-Free-API).
+	captchaParam, err := ComputeCaptchaParam(c.HTTP, c.DeviceToken)
+	if err != nil {
+		return nil, "", webErrorf(429, "z.ai captcha failed: %s", err.Error())
+	}
+	chatBody := c.buildBody(model, messages, prompt, thinkingEnabled, searchEnabled, captchaParam)
 	body, _ := json.Marshal(chatBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v2/chat/completions?"+sig.Query, bytes.NewReader(body))
 	if err != nil {
