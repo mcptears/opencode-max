@@ -830,7 +830,8 @@ $('#qwenConnectForm').onsubmit = async (e) => {
   const f = e.target, msg = $('#qwenConnectMsg');
   const credential = f.credential.value.trim();
   const cookies = f.cookies.value.trim();
-  if (!cookies) { msg.textContent = '✕ cookies are required — paste document.cookie from chat.qwen.ai'; return; }
+  if (!credential) { msg.textContent = '✕ paste your Qwen token first'; return; }
+  if (!cookies) { msg.textContent = '✕ cookies are required — token alone will not work'; return; }
   msg.textContent = 'Validating token…';
   try {
     const v = await (await api('/api/accounts/validate-qwen', {
