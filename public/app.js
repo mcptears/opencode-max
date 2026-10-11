@@ -824,11 +824,13 @@ $('#qwenConnectForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, msg = $('#qwenConnectMsg');
   const credential = f.credential.value.trim();
+  const cookies = f.cookies.value.trim();
   if (!credential) { msg.textContent = '✕ paste your Qwen token first'; return; }
+  if (!cookies) { msg.textContent = '✕ cookies are required — token alone will not work'; return; }
   msg.textContent = 'Validating token…';
   try {
     const v = await (await api('/api/accounts/validate-qwen', {
-      method: 'POST', body: JSON.stringify({ credential }),
+      method: 'POST', body: JSON.stringify({ credential, cookies }),
     })).json();
     if (!v.ok) { msg.textContent = '✕ ' + (v.error || 'token rejected'); return; }
     // Make sure the Qwen provider exists (the sign-in tab does this server-side;
@@ -847,7 +849,7 @@ $('#qwenConnectForm').onsubmit = async (e) => {
       method: 'POST',
       body: JSON.stringify({
         id: `qwen-${n}`, name: f.name.value.trim() || `Qwen ${n}`,
-        provider: 'qwen', apiKey: credential, priority: Number(f.priority.value) || n,
+        provider: 'qwen', apiKey: credential, cookies, priority: Number(f.priority.value) || n,
         useProxy: !!f.useProxy.checked,
       }),
     });
