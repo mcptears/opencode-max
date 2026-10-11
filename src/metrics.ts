@@ -169,6 +169,18 @@ export class Metrics {
     }
   }
 
+  /** Clear all events and request logs. */
+  clearLogs(): void {
+    this.events.length = 0;
+    try {
+      const db = getDb();
+      db.prepare('DELETE FROM metric_events').run();
+      db.prepare('DELETE FROM request_log').run();
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Error rate over a trailing window (for spike alerts). */
   errorRate(windowMs: number): { requests: number; errors: number; rate: number } {
     try {
