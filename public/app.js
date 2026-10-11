@@ -1227,8 +1227,8 @@ async function showProviderDetail(id) {
     <h4 class="sub">Models <span class="hint">shared by all ${esc(p.name)} accounts</span></h4>
     <div class="models">${models.map((m) => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="hint">—</span>'}</div>
     <h4 class="sub">Accounts <span class="hint">${accs.length}</span></h4>
-    ${accs.length ? `<table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead>
-      <tbody>${providerCardRows(accs, s)}</tbody></table>`
+    ${accs.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Pri</th><th>5h usage</th><th>Latency</th><th>State</th><th>Cooldown</th><th></th></tr></thead>
+      <tbody>${providerCardRows(accs, s)}</tbody></table></div></div>`
       : '<div class="hint">no accounts yet — connect one above</div>'}
     <h4 class="sub">Recent requests <span class="hint">24h</span></h4>
     <div id="pdHealth"><span class="hint">loading…</span></div>
@@ -1332,7 +1332,7 @@ async function showProviderDetail(id) {
         `<td><span class="${cls}">${r.status}</span></td><td>${r.latencyMs}<small> ms</small></td></tr>`;
     }).join('');
     $('#pdReqs').innerHTML = rows
-      ? `<table class="tbl"><thead><tr><th>Time</th><th>Model</th><th>Account</th><th>Status</th><th>Latency</th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Time</th><th>Model</th><th>Account</th><th>Status</th><th>Latency</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="hint">no requests yet</div>';
   } catch { $('#pdReqs').innerHTML = ''; }
 }
