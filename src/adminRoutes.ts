@@ -172,8 +172,8 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown; cookies?: unknown };
     const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
     const cookies = typeof body.cookies === 'string' ? body.cookies.trim() : undefined;
-    if (!credential && !cookies) {
-      res.status(400).json({ ok: false, error: 'cookies are required' });
+    if (!credential) {
+      res.status(400).json({ ok: false, error: 'credential is required' });
       return;
     }
     const base =
