@@ -42,7 +42,7 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Account pool</h3><span class="hint">live status</span></div>
-          <div class="tbl-wrap"><table class="tbl" id="accountsTblMini"><thead><tr><th>Account</th><th>Priority</th><th>5h</th><th>State</th><th>Cooldown</th></tr></thead><tbody></tbody></table></div>
+          <div class="tbl-wrap"><table class="tbl" id="accountsTblMini"><thead><tr><th>Account</th><th>Priority</th><th>Proxy</th><th>5h</th><th>State</th><th>Cooldown</th></tr></thead><tbody></tbody></table></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Models · last 24h</h3><span class="hint">requests · errors · avg latency per model</span></div>
@@ -93,6 +93,7 @@
             <label>Cooldown (ms)<input name="cooldownPeriod" type="number" min="0" placeholder="empty = default"></label>
             <label>Upstream override URL<input name="baseUrl" placeholder="empty = default"></label>
             <label>5h quota<input name="quotaLimit" type="number" min="1" placeholder="empty = global"></label>
+            <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
             <button class="btn primary" type="submit">Save changes</button>
           </form>
           <div id="accountEditMsg" class="hint"></div>
@@ -208,6 +209,7 @@
               <label>Display name<input name="name" placeholder="e.g. Qwen main"></label>
               <label>Qwen token <span class="hint">or full Cookie header</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+              <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
             </form>
           </div>
@@ -251,6 +253,7 @@
               <label>Session cookies <span class="hint">(required — token alone won't work)</span><textarea name="cookies" rows="3" placeholder="paste cookies here (document.cookie from chat.deepseek.com)" autocomplete="off" style="font-family:monospace"></textarea></label>
               <div class="hint">In your browser at chat.deepseek.com: DevTools (F12) → Console → run <code>document.cookie</code> → copy the whole string.</div>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+              <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
             </form>
           </div>
@@ -270,6 +273,7 @@
             <label>Display name<input name="name" placeholder="e.g. Z.ai main"></label>
             <label>Z.ai token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
             <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+            <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
             <button class="btn primary" type="submit">Validate &amp; connect</button>
           </form>
           <div id="zaiConnectMsg" class="hint"></div>
