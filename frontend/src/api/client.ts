@@ -28,6 +28,7 @@ export interface Account {
   provider: string;
   priority: number;
   cookies?: string;
+  deviceToken?: string;
   useProxy?: boolean;
   cooldownPeriod?: number;
   baseUrl?: string;
