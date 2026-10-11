@@ -114,6 +114,12 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ metrics: metrics.summary(), events: metrics.recentEvents(50) });
   });
 
+  /** Unified log feed: recent model requests + system events. */
+  router.get('/api/logs', (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    res.json({ requests: metrics.recentLogRequests(limit), events: metrics.recentEvents(50) });
+  });
+
   /** Hourly traffic history for the dashboard chart. */
   router.get('/api/metrics/history', (req, res) => {
     const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
