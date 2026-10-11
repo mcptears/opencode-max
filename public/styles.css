@@ -206,6 +206,8 @@ a.btn{text-decoration:none;display:inline-block}
 
 /* ---------- add-provider dialog ---------- */
 .modal.wide{max-width:720px}
+.proto-opts{display:grid;gap:8px}
+.proto-opts[hidden]{display:none}
 .builtin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .builtin-card{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:14px;padding:16px}
 .builtin-card h4{margin:0 0 6px;display:flex;align-items:center;gap:8px}
