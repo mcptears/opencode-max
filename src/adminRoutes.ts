@@ -64,7 +64,7 @@ function jsonBody(req: express.Request): unknown {
 }
 
 /** Guard mutating endpoints when ADMIN_TOKEN is configured. */
-function adminAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {  const token = getSettings().adminToken;
+export function adminAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {  const token = getSettings().adminToken;
   if (!token) {
     next();
     return;
