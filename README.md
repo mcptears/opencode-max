@@ -139,7 +139,7 @@ POST   /api/proxies/test           # test proxies without adding
 
 opencode-max can front **multiple OpenAI-compatible upstreams** and route by model name — 9router-style. Each provider has its own base URL, model patterns (globs), account pool and on/off switch. Specific patterns beat the `*` catch-all, so `qwen*` routes to Qwen while everything else falls through to Zen.
 
-Manage them in the dashboard's **Providers** section (add, test connection, enable/disable, remove), or via API:
+Manage them in the dashboard's **Providers** section — the page is a clean list; **+ Add provider** opens a dialog with two tabs: **Built-in** (one-click Qwen / DeepSeek / Z.ai provider + account connect) and **Custom** (any OpenAI-compatible upstream). Each row has test connection, enable/disable and remove. Or use the API:
 
 ```bash
 GET    /api/providers              # list
@@ -148,6 +148,11 @@ PUT    /api/providers/:id
 DELETE /api/providers/:id
 POST   /api/providers/:id/test     # live /models check
 ```
+
+## 💬 Playground
+
+The dashboard's **Playground** lets you chat with any connected model before wiring it to external agents — pick a model, send a message, watch the streamed reply (thinking shown inline as `💭`). It runs through the same proxy pipeline as `/v1/chat/completions`, so if it answers here, it'll answer for your agents. Backed by `POST /api/playground/chat` (admin-authed).
+
 
 `GET /v1/models` aggregates the model catalogs of all enabled providers. Accounts belong to a provider via their `provider` field; the base URL resolves as `account.baseUrl` → `provider.baseUrl` → `UPSTREAM_BASE`.
 
@@ -392,7 +397,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 ## 🧪 Testing
 
 ```bash
-npm test   # vitest — 251 tests, isolated temp SQLite via OM_DATA_DIR
+npm test   # vitest — 254 tests, isolated temp SQLite via OM_DATA_DIR
 ```
 
 ## ⚠️ Disclaimer
