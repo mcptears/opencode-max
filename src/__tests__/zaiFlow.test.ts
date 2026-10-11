@@ -45,7 +45,7 @@ beforeAll(async () => {
         }
         return;
       }
-      if (url.startsWith('/api/v2/chat/completions') && req.method === 'POST') {
+      if (url.startsWith('/api/chat/completions') && req.method === 'POST') {
         lastChatQuery = url.split('?')[1] ?? '';
         lastChatHeaders = { 'x-signature': String(req.headers['x-signature'] ?? ''), 'x-fe-version': String(req.headers['x-fe-version'] ?? '') };
         lastChatBody = JSON.parse(body);
