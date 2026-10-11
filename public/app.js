@@ -671,6 +671,7 @@ async function addBuiltinPreset(kind) {
   }
   loadUpProviders();
 }
+$('#apZenPreset').onclick = () => addBuiltinPreset('opencode-zen');
 $('#apQwenPreset').onclick = () => addBuiltinPreset('qwen');
 $('#apDsPreset').onclick = () => addBuiltinPreset('deepseek');
 $('#apZaiPreset').onclick = () => addBuiltinPreset('zai');
@@ -934,11 +935,13 @@ $('#dsConnectForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target, msg = $('#dsConnectMsg');
   const credential = f.credential.value.trim();
+  const cookies = f.cookies.value.trim();
   if (!credential) { msg.textContent = '✕ paste your DeepSeek token first'; return; }
+  if (!cookies) { msg.textContent = '✕ cookies are required — token alone will not work'; return; }
   msg.textContent = 'Validating token…';
   try {
     const v = await (await api('/api/accounts/validate-deepseek', {
-      method: 'POST', body: JSON.stringify({ credential }),
+      method: 'POST', body: JSON.stringify({ credential, cookies }),
     })).json();
     if (!v.ok) { msg.textContent = '✕ ' + (v.error || 'token rejected'); return; }
     // Make sure the DeepSeek provider exists (the sign-in tab does this
@@ -957,7 +960,7 @@ $('#dsConnectForm').onsubmit = async (e) => {
       method: 'POST',
       body: JSON.stringify({
         id: `deepseek-${n}`, name: f.name.value.trim() || `DeepSeek ${n}`,
-        provider: 'deepseek', apiKey: credential, priority: Number(f.priority.value) || n,
+        provider: 'deepseek', apiKey: credential, cookies, priority: Number(f.priority.value) || n,
       }),
     });
     if (!r.ok) throw new Error((await r.text()).slice(0, 160));
