@@ -40,6 +40,8 @@ function validateAccount(a: unknown): { ok: true; account: AccountConfig } | { o
     apiKey: (r.apiKey as string).trim(),
     priority: r.priority as number,
     cookies: typeof r.cookies === 'string' && r.cookies.trim() ? r.cookies.trim() : undefined,
+    /** When false, this account connects directly (no proxy). Default true (legacy behavior). */
+    useProxy: r.useProxy === false ? false : undefined,
     cooldownPeriod: typeof r.cooldownPeriod === 'number' && r.cooldownPeriod > 0 ? r.cooldownPeriod : undefined,
     baseUrl: typeof r.baseUrl === 'string' && (r.baseUrl as string).trim() ? (r.baseUrl as string).trim() : undefined,
     quotaLimit:
@@ -431,6 +433,23 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     pool.replace(accounts);
     metrics.record('account_added', `account '${v.account.id}' updated`);
     res.json({ ok: true });
+  });
+
+  /** Toggle per-account proxy routing. */
+  router.patch('/api/accounts/:id', (req, res) => {
+    const body = (jsonBody(req) ?? {}) as Record<string, unknown>;
+    const accounts = readAccounts();
+    const i = accounts.findIndex((a) => a.id === req.params.id);
+    if (i < 0) {
+      res.status(404).json({ error: { message: 'account not found', status: 404 } });
+      return;
+    }
+    if (typeof body.useProxy === 'boolean') {
+      accounts[i] = { ...accounts[i], useProxy: body.useProxy ? undefined : false };
+      writeAccounts(accounts);
+      pool.replace(accounts);
+    }
+    res.json({ ok: true, useProxy: accounts[i].useProxy !== false });
   });
 
   router.delete('/api/accounts/:id', (req, res) => {
