@@ -61,7 +61,80 @@ export function resolveQwenModel(
   return defaultModel;
 }
 
-/** A pasted Cookie header contains '=' / ';' — send it as Cookie, else Bearer. */
+/** Baxia (Aliyun WAF) token version. */
+const BAXIA_VERSION = '2.5.36';
+
+/** Generate a random browser fingerprint for the bx-ua token. */
+function baxiaFingerprint(): Record<string, unknown> {
+  const platforms = ['Win32', 'Linux x86_64', 'MacIntel'];
+  const languages = ['en-US', 'zh-CN', 'en-GB'];
+  const renderers = [
+    'ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.6)',
+    'ANGLE (NVIDIA, NVIDIA GeForce GTX 1080, OpenGL 4.6)',
+    'ANGLE (AMD, AMD Radeon RX 580, OpenGL 4.6)',
+  ];
+  return {
+    p: platforms[Math.floor(Math.random() * platforms.length)],
+    l: languages[Math.floor(Math.random() * languages.length)],
+    hc: 4 + Math.floor(Math.random() * 12),
+    dm: [4, 8, 16, 32][Math.floor(Math.random() * 4)],
+    to: [-480, -300, 0, 60, 480][Math.floor(Math.random() * 5)],
+    sw: 1920 + Math.floor(Math.random() * 200),
+    sh: 1080 + Math.floor(Math.random() * 100),
+    cd: 24,
+    pr: [1, 1.25, 1.5, 2][Math.floor(Math.random() * 4)],
+    wf: renderers[Math.floor(Math.random() * renderers.length)].substring(0, 20),
+    cf: crypto.randomUUID().replace(/-/g, '').substring(0, 32),
+    af: (124.04347527516074 + Math.random() * 0.001).toFixed(14),
+    ts: Date.now(),
+    r: Math.random(),
+  };
+}
+
+/** bx-ua = version (dots removed) + '!' + base64(fingerprint JSON). */
+function baxiaUa(): string {
+  const json = JSON.stringify(baxiaFingerprint());
+  const b64 = Buffer.from(json, 'utf8').toString('base64');
+  return `${BAXIA_VERSION.replace(/\./g, '')}!${b64}`;
+}
+
+let bxUmidTokenCache: string | null = null;
+let bxUmidTokenTime = 0;
+const BX_UMID_TTL = 4 * 60 * 1000;
+
+/** Fetch the T2gAv_ umid token from Alibaba's WU endpoint (cached 4 min). */
+async function baxiaUmidToken(): Promise<string> {
+  const now = Date.now();
+  if (bxUmidTokenCache && now - bxUmidTokenTime < BX_UMID_TTL) return bxUmidTokenCache;
+  try {
+    const r = await fetch('https://sg-wum.alibaba.com/w/wu.json', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36' },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await r.text();
+    const m = text.match(/umx\.wu\('([^']+)'\)/) || text.match(/'([^']+)'/);
+    const token = (m && m[1]) || r.headers.get('etag') || '';
+    if (token && /^T2gA/i.test(token)) {
+      bxUmidTokenCache = token;
+      bxUmidTokenTime = now;
+      return token;
+    }
+  } catch {
+    /* fall through to empty */
+  }
+  return '';
+}
+
+/** Baxia auth headers for Qwen web API (replaces Bearer/Cookie auth). */
+export function qwenBaxiaHeaders(): Promise<Record<string, string>> {
+  return baxiaUmidToken().then((umid) => ({
+    'bx-ua': baxiaUa(),
+    'bx-umidtoken': umid,
+    'bx-v': BAXIA_VERSION,
+  }));
+}
+
+/** A pasted Cookie header contains '=' / ';' — send it as Cookie, else Bearer. (Legacy; baxia is preferred.) */
 export function qwenAuthHeaders(credential: string): Record<string, string> {
   const c = credential.trim();
   if (c.includes('=') || c.includes(';')) {
@@ -71,15 +144,22 @@ export function qwenAuthHeaders(credential: string): Record<string, string> {
   return { authorization: `Bearer ${c}` };
 }
 
-function headers(credential: string, cookies?: string): Record<string, string> {
+async function headers(credential: string, cookies?: string): Promise<Record<string, string>> {
+  // Prefer baxia tokens (zero-config, no user token needed). Fall back to the
+  // pasted credential only when baxia umid fetch fails.
+  const baxia = await qwenBaxiaHeaders();
   const h: Record<string, string> = {
-    ...qwenAuthHeaders(credential),
     'content-type': 'application/json',
     source: 'web',
     'x-request-id': crypto.randomUUID(),
     'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
   };
+  if (baxia['bx-umidtoken']) {
+    Object.assign(h, baxia);
+  } else {
+    Object.assign(h, qwenAuthHeaders(credential));
+  }
   if (cookies?.trim()) h['cookie'] = cookies.trim();
   return h;
 }
@@ -116,7 +196,7 @@ interface FetchOpts {
 async function qwenFetch(baseUrl: string, credential: string, path: string, init: RequestInit, opts: FetchOpts, cookies?: string): Promise<Response> {
   return fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
     ...init,
-    headers: { ...headers(credential, cookies), ...init.headers },
+    headers: { ...(await headers(credential, cookies)), ...init.headers },
     signal: opts.signal,
     dispatcher: opts.dispatcher,
   } as RequestInit & { dispatcher?: unknown });
@@ -225,7 +305,7 @@ async function createChat(baseUrl: string, credential: string, model: string, op
     '/api/v2/chats/new',
     {
       method: 'POST',
-      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: 'normal', chat_type: 't2t', timestamp: Date.now() }),
+      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: 'guest', chat_type: 't2t', timestamp: Date.now() }),
     },
     opts,
     cookies,
@@ -309,7 +389,7 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
           stream: true,
           incremental_output: true,
           chat_id: chatId,
-          chat_mode: 'normal',
+          chat_mode: 'guest',
           model: req.model,
           parent_id: null,
           messages: [
