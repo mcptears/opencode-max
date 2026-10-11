@@ -145,8 +145,8 @@ export function qwenAuthHeaders(credential: string): Record<string, string> {
 }
 
 async function headers(credential: string, cookies?: string): Promise<Record<string, string>> {
-  // Prefer baxia tokens (zero-config, no user token needed). Fall back to the
-  // pasted credential only when baxia umid fetch fails.
+  // Baxia headers bypass the Aliyun WAF; the user credential authenticates the
+  // account. Send both when we have them — logged-in mode. Baxia-only is guest.
   const baxia = await qwenBaxiaHeaders();
   const h: Record<string, string> = {
     'content-type': 'application/json',
@@ -155,13 +155,16 @@ async function headers(credential: string, cookies?: string): Promise<Record<str
     'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
   };
-  if (baxia['bx-umidtoken']) {
-    Object.assign(h, baxia);
-  } else {
-    Object.assign(h, qwenAuthHeaders(credential));
-  }
+  if (baxia['bx-umidtoken']) Object.assign(h, baxia);
+  const cred = credential?.trim();
+  if (cred) Object.assign(h, qwenAuthHeaders(cred));
   if (cookies?.trim()) h['cookie'] = cookies.trim();
   return h;
+}
+
+/** chat_mode: 'normal' for logged-in accounts, 'guest' when no credential. */
+function chatMode(credential: string | undefined): string {
+  return credential?.trim() ? 'normal' : 'guest';
 }
 
 function textContent(content: unknown): string {
@@ -305,7 +308,7 @@ async function createChat(baseUrl: string, credential: string, model: string, op
     '/api/v2/chats/new',
     {
       method: 'POST',
-      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: 'guest', chat_type: 't2t', timestamp: Date.now() }),
+      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: chatMode(credential), chat_type: 't2t', timestamp: Date.now() }),
     },
     opts,
     cookies,
@@ -389,7 +392,7 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
           stream: true,
           incremental_output: true,
           chat_id: chatId,
-          chat_mode: 'guest',
+          chat_mode: chatMode(req.credential),
           model: req.model,
           parent_id: null,
           messages: [
