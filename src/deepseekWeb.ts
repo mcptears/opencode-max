@@ -274,9 +274,10 @@ function sessionHeaders(credential: string, deviceId?: string): Record<string, s
   const h: Record<string, string> = {
     ...baseHeaders(),
     authorization: `Bearer ${credential.trim()}`,
+    'x-app-version': '2.0.0',
     'x-client-bundle-id': 'com.deepseek.chat',
     'x-client-platform': 'web',
-    'x-client-version': '2.5.0',
+    'x-client-version': '2.0.0',
     'x-client-locale': 'en_US',
     'x-client-timezone-offset': String(-new Date().getTimezoneOffset() * 60),
     'x-device-id': deviceId ?? crypto.randomUUID(),
