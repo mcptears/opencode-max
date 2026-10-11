@@ -104,11 +104,8 @@ export const QWEN_PRESET: ProviderConfig = {
     defaultModel: 'qwen3.7-plus',
     modelMap: {
       'qwen3.7-plus': 'qwen3.7-plus',
-      'qwen3.7-max': 'qwen3.7-max',
       'qwen3.8-max': 'qwen3.8-max',
       'qwen3.8-omni-flash': 'qwen3.8-omni-flash',
-      'qwen3.6-plus': 'qwen3.6-plus',
-      'qwen3.5-plus': 'qwen3.5-plus',
     },
   },
 };
