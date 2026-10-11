@@ -158,6 +158,17 @@ export class Metrics {
     return this.events.slice(0, limit);
   }
 
+  /** Recent request log rows for the Logs tab, newest first. */
+  recentLogRequests(limit = 100): { ts: number; account_id: string; status: number; latency_ms: number; model: string | null }[] {
+    try {
+      return getDb()
+        .prepare('SELECT ts, account_id, status, latency_ms, model FROM request_log ORDER BY ts DESC LIMIT ?')
+        .all(limit) as { ts: number; account_id: string; status: number; latency_ms: number; model: string | null }[];
+    } catch {
+      return [];
+    }
+  }
+
   /** Error rate over a trailing window (for spike alerts). */
   errorRate(windowMs: number): { requests: number; errors: number; rate: number } {
     try {
