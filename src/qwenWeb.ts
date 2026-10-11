@@ -145,9 +145,6 @@ export function qwenAuthHeaders(credential: string): Record<string, string> {
 }
 
 async function headers(credential: string, cookies?: string): Promise<Record<string, string>> {
-  // Baxia headers bypass the Aliyun WAF; the user credential authenticates the
-  // account. Send both when we have them — logged-in mode. Baxia-only is guest.
-  const baxia = await qwenBaxiaHeaders();
   const h: Record<string, string> = {
     'content-type': 'application/json',
     source: 'web',
@@ -155,9 +152,15 @@ async function headers(credential: string, cookies?: string): Promise<Record<str
     'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
   };
-  if (baxia['bx-umidtoken']) Object.assign(h, baxia);
   const cred = credential?.trim();
-  if (cred) Object.assign(h, qwenAuthHeaders(cred));
+  if (cred) {
+    // Logged-in: user credential only (baxia is for guest/WAF bypass).
+    Object.assign(h, qwenAuthHeaders(cred));
+  } else {
+    // Guest: baxia tokens only.
+    const baxia = await qwenBaxiaHeaders();
+    if (baxia['bx-umidtoken']) Object.assign(h, baxia);
+  }
   if (cookies?.trim()) h['cookie'] = cookies.trim();
   return h;
 }
