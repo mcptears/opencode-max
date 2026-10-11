@@ -120,6 +120,12 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     res.json({ requests: metrics.recentLogRequests(limit), events: metrics.recentEvents(50) });
   });
 
+  /** Clear all logs (requests + events). */
+  router.delete('/api/logs', (_req, res) => {
+    metrics.clearLogs();
+    res.json({ ok: true });
+  });
+
   /** Hourly traffic history for the dashboard chart. */
   router.get('/api/metrics/history', (req, res) => {
     const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
