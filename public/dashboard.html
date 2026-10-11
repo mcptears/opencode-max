@@ -12,18 +12,18 @@
   <aside class="sidebar">
     <div class="brand"><span class="logo">⚡</span><div><h1>opencode-max</h1><p>zen proxy control</p></div></div>
     <nav>
-      <button data-sec="overview" class="active"><span class="ic">📊</span>Overview</button>
-      <button data-sec="accounts"><span class="ic">🔑</span>Accounts</button>
-      <button data-sec="providers"><span class="ic">🔌</span>Providers</button>
-      <button data-sec="playground"><span class="ic">💬</span>Playground</button>
-      <button data-sec="proxies"><span class="ic">🌐</span>Proxies</button>
-      <button data-sec="settings"><span class="ic">⚙️</span>Settings</button>
-      <button data-sec="events"><span class="ic">📝</span>Events</button>
-      <button data-sec="setup"><span class="ic">🔌</span>Setup</button>
+      <button data-sec="overview" class="active"><span class="ic">📊</span><span class="lbl">Overview</span></button>
+      <button data-sec="accounts"><span class="ic">🔑</span><span class="lbl">Accounts</span></button>
+      <button data-sec="providers"><span class="ic">🔌</span><span class="lbl">Providers</span></button>
+      <button data-sec="playground"><span class="ic">💬</span><span class="lbl">Playground</span></button>
+      <button data-sec="proxies"><span class="ic">🌐</span><span class="lbl">Proxies</span></button>
+      <button data-sec="settings"><span class="ic">⚙️</span><span class="lbl">Settings</span></button>
+      <button data-sec="events"><span class="ic">📝</span><span class="lbl">Events</span></button>
+      <button data-sec="setup"><span class="ic">🔌</span><span class="lbl">Setup</span></button>
     </nav>
     <div class="side-foot">
       <div class="egress"><span class="dot" id="egressDot"></span><span id="egressLabel">direct</span></div>
-      <button id="btnRotate" class="btn primary block">🔄 Rotate IP</button>
+      <button id="btnRotate" class="btn primary block">🔄 <span class="lbl">Rotate IP</span></button>
     </div>
   </aside>
 
@@ -42,23 +42,23 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Account pool</h3><span class="hint">live status</span></div>
-          <table class="tbl" id="accountsTblMini"><thead><tr><th>Account</th><th>Priority</th><th>5h</th><th>State</th><th>Cooldown</th></tr></thead><tbody></tbody></table>
+          <div class="tbl-wrap"><table class="tbl" id="accountsTblMini"><thead><tr><th>Account</th><th>Priority</th><th>5h</th><th>State</th><th>Cooldown</th></tr></thead><tbody></tbody></table></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Models · last 24h</h3><span class="hint">requests · errors · avg latency per model</span></div>
-          <table class="tbl" id="modelsTbl"><thead><tr><th>Model</th><th>Provider</th><th>Requests</th><th>Errors</th><th>Avg latency</th></tr></thead><tbody></tbody></table>
+          <div class="tbl-wrap"><table class="tbl" id="modelsTbl"><thead><tr><th>Model</th><th>Provider</th><th>Requests</th><th>Errors</th><th>Avg latency</th></tr></thead><tbody></tbody></table></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Token usage · last 24h</h3><span class="hint">as reported by upstreams</span></div>
-          <table class="tbl" id="usageTbl"><thead><tr><th>Account</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Requests</th></tr></thead><tbody></tbody></table>
+          <div class="tbl-wrap"><table class="tbl" id="usageTbl"><thead><tr><th>Account</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Requests</th></tr></thead><tbody></tbody></table></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Provider health · last 24h</h3><span class="hint">success rate · latency · last error</span></div>
-          <table class="tbl" id="provHealthTbl"><thead><tr><th>Provider</th><th>Requests</th><th>Success</th><th>Avg latency</th><th>Last error</th></tr></thead><tbody></tbody></table>
+          <div class="tbl-wrap"><table class="tbl" id="provHealthTbl"><thead><tr><th>Provider</th><th>Requests</th><th>Success</th><th>Avg latency</th><th>Last error</th></tr></thead><tbody></tbody></table></div>
         </div>
         <div class="panel">
           <div class="panel-head"><h3>Recent requests</h3><span class="hint">newest first</span></div>
-          <table class="tbl" id="requestsTbl"><thead><tr><th>Time</th><th>Model</th><th>Provider</th><th>Account</th><th>Status</th><th>Latency</th></tr></thead><tbody></tbody></table>
+          <div class="tbl-wrap"><table class="tbl" id="requestsTbl"><thead><tr><th>Time</th><th>Model</th><th>Provider</th><th>Account</th><th>Status</th><th>Latency</th></tr></thead><tbody></tbody></table></div>
         </div>
       </section>
 
