@@ -109,6 +109,13 @@
           <div id="aptab-builtin">
             <div class="builtin-grid">
               <div class="builtin-card">
+                <h4>OpenCode Zen <span class="tag">openai</span></h4>
+                <p class="hint">The default OpenCode upstream — restore it if removed.</p>
+                <div class="row-btns">
+                  <button class="btn primary" id="apZenPreset">Add provider</button>
+                </div>
+              </div>
+              <div class="builtin-card">
                 <h4>Qwen <span class="tag">qwen-web</span></h4>
                 <p class="hint">Free Qwen chat, runs natively inside opencode-max — no separate deployment.</p>
                 <div class="row-btns">
@@ -241,6 +248,8 @@
             <form id="dsConnectForm" class="form-grid">
               <label>Display name<input name="name" placeholder="e.g. DeepSeek main"></label>
               <label>DeepSeek token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label>Session cookies <span class="hint">(required — token alone won't work)</span><textarea name="cookies" rows="3" placeholder="paste cookies here (document.cookie from chat.deepseek.com)" autocomplete="off" style="font-family:monospace"></textarea></label>
+              <div class="hint">In your browser at chat.deepseek.com: DevTools (F12) → Console → run <code>document.cookie</code> → copy the whole string.</div>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
             </form>
