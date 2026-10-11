@@ -146,18 +146,22 @@ export function qwenAuthHeaders(credential: string): Record<string, string> {
 
 async function headers(credential: string, cookies?: string): Promise<Record<string, string>> {
   const h: Record<string, string> = {
+    'Accept': 'application/json',
     'content-type': 'application/json',
+    'Origin': 'https://chat.qwen.ai',
+    'Referer': 'https://chat.qwen.ai/c/guest',
     source: 'web',
+    'version': '0.2.83',
     'x-request-id': crypto.randomUUID(),
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'user-agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
   };
-  // Baxia always (WAF bypass) — proven working in guest mode.
+  // Baxia always (WAF bypass).
   const baxia = await qwenBaxiaHeaders();
   if (baxia['bx-umidtoken']) Object.assign(h, baxia);
-  // Logged-in: cookies authenticate the account. The localStorage token is a
-  // UI token, not an API credential — don't send it as Bearer.
-  if (cookies?.trim()) h['cookie'] = cookies.trim();
+  // Logged-in: cookies authenticate the account.
+  if (cookies?.trim()) h['Cookie'] = cookies.trim();
   return h;
 }
 
@@ -307,7 +311,7 @@ async function createChat(baseUrl: string, credential: string, model: string, op
     '/api/v2/chats/new',
     {
       method: 'POST',
-      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: chatMode(credential), chat_type: 't2t', timestamp: Date.now() }),
+      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: chatMode(credential), chat_type: 't2t', timestamp: Date.now(), project_id: '' }),
     },
     opts,
     cookies,
