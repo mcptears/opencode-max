@@ -169,8 +169,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
 
   /** Validate a Qwen web credential (token or cookie) without adding it. */
   router.post('/api/accounts/validate-qwen', async (req, res) => {
-    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown };
+    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown; cookies?: unknown };
     const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+    const cookies = typeof body.cookies === 'string' ? body.cookies.trim() : undefined;
     if (!credential) {
       res.status(400).json({ ok: false, error: 'credential is required' });
       return;
@@ -179,7 +180,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       typeof body.baseUrl === 'string' && body.baseUrl.trim()
         ? body.baseUrl.trim().replace(/\/+$/, '')
         : (loadProviders().find((p) => p.protocol === 'qwen-web')?.baseUrl ?? 'https://chat.qwen.ai');
-    const r = await validateQwenCredential(base, credential);
+    const r = await validateQwenCredential(base, credential, {}, cookies);
     res.json(r);
   });
 
