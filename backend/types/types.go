@@ -21,6 +21,10 @@ type AccountConfig struct {
 	// Cookies holds optional session cookies (e.g. DeepSeek web chat needs
 	// these plus the token).
 	Cookies string `json:"cookies,omitempty"`
+	// DeviceToken is the Aliyun device fingerprint for Z.ai accounts
+	// (window.z_um.getToken() in the browser at chat.z.ai), used to generate
+	// captcha_verify_param for each request.
+	DeviceToken string `json:"deviceToken,omitempty"`
 	// UseProxy: when false the account connects directly without a proxy.
 	// Nil (absent) preserves the legacy default of true.
 	UseProxy *bool `json:"useProxy,omitempty"`
