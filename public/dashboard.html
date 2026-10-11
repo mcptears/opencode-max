@@ -148,11 +148,11 @@
                   <option value="zai-web">Z.ai web (built-in)</option>
                 </select>
               </label>
-              <div id="qwenOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+              <div id="qwenOpts" class="proto-opts" hidden style="grid-column:span 2">
                 <input name="qwenDefaultModel" placeholder="Qwen web model id · e.g. qwen3.7-plus">
                 <textarea name="qwenModelMap" rows="2" placeholder='model map JSON · e.g. {"qwen-max": "qwen3.7-max"}' spellcheck="false"></textarea>
               </div>
-              <div id="dsOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+              <div id="dsOpts" class="proto-opts" hidden style="grid-column:span 2">
                 <input name="dsDefaultModel" placeholder="DeepSeek web model id · e.g. deepseek-chat">
                 <textarea name="dsModelMap" rows="2" placeholder='model map JSON · e.g. {"ds-r1": "deepseek-reasoner"}' spellcheck="false"></textarea>
                 <div class="row-btns">
@@ -160,7 +160,7 @@
                   <label class="check"><input type="checkbox" name="dsSearch"> Web search <span class="hint">search on by default</span></label>
                 </div>
               </div>
-              <div id="zaiOpts" hidden style="grid-column:span 2; display:grid; gap:8px">
+              <div id="zaiOpts" class="proto-opts" hidden style="grid-column:span 2">
                 <input name="zaiDefaultModel" placeholder="Z.ai web model id · e.g. glm-5">
                 <textarea name="zaiModelMap" rows="2" placeholder='model map JSON · e.g. {"glm-fast": "glm-5-flash"}' spellcheck="false"></textarea>
                 <div class="row-btns">
