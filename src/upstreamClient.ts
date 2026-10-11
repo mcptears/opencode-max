@@ -237,7 +237,9 @@ export class UpstreamClient {
       this.metrics?.hit(account.id);
       const attemptStart = Date.now();
 
-      const proxy = this.rotator.current();
+      // Accounts opt out of the proxy pool with useProxy: false (e.g. web
+      // providers like Qwen/DeepSeek/Z.ai that don't enforce IP limits).
+      const proxy = account.useProxy === false ? null : this.rotator.current();
       const base = this.resolveBaseUrl(account);
       const url = `${base}${req.path}${req.query}`;
 
