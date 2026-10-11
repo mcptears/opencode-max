@@ -616,6 +616,18 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     const providers = loadProviders();
     const existing = providers.find((p) => p.id === DEEPSEEK_PRESET.id);
     if (existing) {
+      // Refresh stale model lists on existing providers.
+      const ds = (existing as { deepseek?: { defaultModel?: string; modelMap?: Record<string, string> } }).deepseek;
+      const needsRefresh = ds?.defaultModel !== DEEPSEEK_PRESET.deepseek?.defaultModel ||
+        JSON.stringify(Object.keys(ds?.modelMap ?? {}).sort()) !== JSON.stringify(Object.keys(DEEPSEEK_PRESET.deepseek?.modelMap ?? {}).sort());
+      if (needsRefresh) {
+        const i = providers.indexOf(existing);
+        providers[i] = { ...existing, ...DEEPSEEK_PRESET, name: existing.name || DEEPSEEK_PRESET.name };
+        saveProviders(providers);
+        metrics.record('settings', 'deepseek provider models refreshed');
+        res.json({ ok: true, upgraded: true, provider: DEEPSEEK_PRESET });
+        return;
+      }
       res.status(409).json({ error: { message: 'deepseek provider already exists', status: 409 } });
       return;
     }
