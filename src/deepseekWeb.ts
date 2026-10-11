@@ -41,6 +41,8 @@ export interface DeepSeekWebRequest {
   baseUrl: string;
   /** userToken from chat.deepseek.com localStorage (or the login token). */
   credential: string;
+  /** Session cookies from chat.deepseek.com (Cookie header value). Required — token alone doesn't work. */
+  cookies?: string;
   /** Resolved DeepSeek web model id, e.g. "deepseek-chat". */
   model: string;
   /** OpenAI-format messages; flattened into one prompt (disposable sessions). */
@@ -270,7 +272,7 @@ function baseHeaders(): Record<string, string> {
   };
 }
 
-function sessionHeaders(credential: string, deviceId?: string): Record<string, string> {
+function sessionHeaders(credential: string, deviceId?: string, cookies?: string): Record<string, string> {
   const h: Record<string, string> = {
     ...baseHeaders(),
     authorization: `Bearer ${credential.trim()}`,
@@ -284,6 +286,7 @@ function sessionHeaders(credential: string, deviceId?: string): Record<string, s
     'x-device-model': '',
     'accept-language': 'en',
   };
+  if (cookies?.trim()) h['cookie'] = cookies.trim();
   return h;
 }
 
@@ -424,10 +427,11 @@ export async function validateDeepSeekCredential(
   baseUrl: string,
   credential: string,
   opts: FetchOpts = {},
+  cookies?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const id = await createChatSession(baseUrl, credential, opts);
-    await deleteChatSession(baseUrl, credential, id, opts);
+    const id = await createChatSession(baseUrl, credential, opts, cookies);
+    await deleteChatSession(baseUrl, credential, id, opts, cookies);
     return { ok: true };
   } catch (e) {
     if (e instanceof DeepSeekWebError && e.status === 401) {
@@ -437,11 +441,11 @@ export async function validateDeepSeekCredential(
   }
 }
 
-async function apiPost(baseUrl: string, credential: string, path: string, body: unknown, opts: FetchOpts, extraHeaders?: Record<string, string>): Promise<unknown> {
+async function apiPost(baseUrl: string, credential: string, path: string, body: unknown, opts: FetchOpts, extraHeaders?: Record<string, string>, cookies?: string): Promise<unknown> {
   const r = await dsFetch(
     baseUrl,
     path,
-    { method: 'POST', headers: { ...sessionHeaders(credential), ...extraHeaders }, body: JSON.stringify(body) },
+    { method: 'POST', headers: { ...sessionHeaders(credential, undefined, cookies), ...extraHeaders }, body: JSON.stringify(body) },
     opts,
   );
   const text = await r.text().catch(() => '');
@@ -461,8 +465,8 @@ async function apiPost(baseUrl: string, credential: string, path: string, body: 
   return d?.biz_data ?? null;
 }
 
-async function createChatSession(baseUrl: string, credential: string, opts: FetchOpts): Promise<string> {
-  const data = (await apiPost(baseUrl, credential, '/api/v0/chat_session/create', {}, opts)) as {
+async function createChatSession(baseUrl: string, credential: string, opts: FetchOpts, cookies?: string): Promise<string> {
+  const data = (await apiPost(baseUrl, credential, '/api/v0/chat_session/create', {}, opts, undefined, cookies)) as {
     chat_session?: { id?: unknown };
   } | null;
   const id = data?.chat_session?.id;
@@ -471,16 +475,16 @@ async function createChatSession(baseUrl: string, credential: string, opts: Fetc
 }
 
 /** Best-effort session cleanup; never throws. */
-async function deleteChatSession(baseUrl: string, credential: string, id: string, opts: FetchOpts): Promise<void> {
+async function deleteChatSession(baseUrl: string, credential: string, id: string, opts: FetchOpts, cookies?: string): Promise<void> {
   try {
-    await apiPost(baseUrl, credential, '/api/v0/chat_session/delete', { chat_session_id: id }, opts);
+    await apiPost(baseUrl, credential, '/api/v0/chat_session/delete', { chat_session_id: id }, opts, undefined, cookies);
   } catch {
     /* ignore — sessions are disposable */
   }
 }
 
-async function createPowChallenge(baseUrl: string, credential: string, opts: FetchOpts): Promise<PowChallenge> {
-  const data = (await apiPost(baseUrl, credential, '/api/v0/chat/create_pow_challenge', { target_path: '/api/v0/chat/completion' }, opts)) as {
+async function createPowChallenge(baseUrl: string, credential: string, opts: FetchOpts, cookies?: string): Promise<PowChallenge> {
+  const data = (await apiPost(baseUrl, credential, '/api/v0/chat/create_pow_challenge', { target_path: '/api/v0/chat/completion' }, opts, undefined, cookies)) as {
     challenge?: PowChallenge;
   } | null;
   const ch = data?.challenge;
@@ -698,14 +702,14 @@ export async function deepseekChatCompletion(req: DeepSeekWebRequest): Promise<R
   // resolved the provider's modelMap; otherwise derive from the model name.
   const resolved = req.web ?? resolveDeepSeekModel(undefined, req.model, req.responseModel ?? req.model);
 
-  const sessionId = await createChatSession(base, req.credential, opts);
+  const sessionId = await createChatSession(base, req.credential, opts, req.cookies);
   const finishSession = (): void => {
     void deleteChatSession(base, req.credential, sessionId, opts);
   };
 
   let upstream: Response;
   try {
-    const challenge = await createPowChallenge(base, req.credential, opts);
+    const challenge = await createPowChallenge(base, req.credential, opts, req.cookies);
     const answer = await solveDeepSeekPoW(challenge);
     const deviceId = crypto.randomUUID();
     upstream = await dsFetch(
@@ -714,7 +718,7 @@ export async function deepseekChatCompletion(req: DeepSeekWebRequest): Promise<R
       {
         method: 'POST',
         headers: {
-          ...sessionHeaders(req.credential, deviceId),
+          ...sessionHeaders(req.credential, deviceId, req.cookies),
           'x-ds-pow-response': powResponseHeader(challenge, answer),
         },
         body: JSON.stringify({
