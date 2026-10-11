@@ -25,8 +25,10 @@ func (s *Server) registerAdmin(r chi.Router) {
 	// ---- status / metrics / logs ----
 	r.Get("/status", s.handleStatus)
 	r.Get("/metrics", s.handleMetrics)
+	r.Get("/metrics/summary", s.handleMetricsSummary)
 	r.Get("/logs", s.handleLogs)
 	r.Delete("/logs", s.handleClearLogs)
+	r.Post("/logs/clear", s.handleClearLogs)
 	r.Get("/metrics/history", s.handleMetricsHistory)
 	r.Get("/metrics/models", s.handleMetricsModels)
 	r.Get("/usage", s.handleUsage)
@@ -78,6 +80,7 @@ func (s *Server) registerAdmin(r chi.Router) {
 	// ---- settings ----
 	r.Get("/settings", s.handleGetSettings)
 	r.Post("/settings", s.handlePostSettings)
+	r.Put("/settings", s.handlePostSettings)
 
 	// ---- backup / restore (GET requires auth even though it is a read) ----
 	r.With(middleware.AdminAuth(func() string { return s.deps.Settings.Get().AdminToken })).
@@ -85,6 +88,7 @@ func (s *Server) registerAdmin(r chi.Router) {
 	r.Post("/backup/restore", s.handleRestoreBackup)
 
 	// ---- playground (admin-authed via the /api mutation guard) ----
+	r.Get("/playground/models", s.handlePlaygroundModels)
 	r.Post("/playground/chat", s.handlePlaygroundChat)
 }
 
@@ -137,12 +141,174 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMetricsSummary returns the dashboard-friendly overview shape:
+// {totalRequests, successRate, avgLatencyMs, activeAccounts, totalAccounts}.
+func (s *Server) handleMetricsSummary(w http.ResponseWriter, r *http.Request) {
+	sum := s.deps.Metrics.Summary()
+	// Summary() returns metrics.Summary; extract via JSON round-trip to avoid
+	// coupling to its concrete type.
+	var sm struct {
+		Requests  int64 `json:"requests"`
+		Successes int64 `json:"successes"`
+	}
+	if b, err := json.Marshal(sum); err == nil {
+		_ = json.Unmarshal(b, &sm)
+	}
+	var successRate float64
+	if sm.Requests > 0 {
+		successRate = float64(sm.Successes) / float64(sm.Requests)
+	}
+	// Avg latency over recent requests.
+	var totalLat int64
+	var latN int64
+	for _, rq := range decodeLogRows(s.deps.Metrics.RecentLogRequests(100)) {
+		totalLat += int64(rq.LatencyMs)
+		latN++
+	}
+	var avgLatency float64
+	if latN > 0 {
+		avgLatency = float64(totalLat) / float64(latN)
+	}
+	// Account counts from pool status.
+	var active, total int
+	for _, a := range s.deps.Pool.Status() {
+		total++
+		if a.State == "active" {
+			active++
+		}
+	}
+	writeJSON(w, 200, map[string]any{
+		"totalRequests":  sm.Requests,
+		"successRate":    successRate,
+		"avgLatencyMs":   avgLatency,
+		"activeAccounts": active,
+		"totalAccounts":  total,
+	})
+}
+
+// handlePlaygroundModels returns the model names from all enabled providers.
+// Web-protocol providers expand via their modelMap keys; otherwise the raw
+// model patterns are returned (bare "*" catch-alls are skipped).
+func (s *Server) handlePlaygroundModels(w http.ResponseWriter, r *http.Request) {
+	seen := map[string]bool{}
+	var models []string
+	add := func(m string) {
+		m = strings.TrimSpace(m)
+		if m == "" || m == "*" || seen[m] {
+			return
+		}
+		seen[m] = true
+		models = append(models, m)
+	}
+	for _, p := range s.deps.Providers.Load() {
+		if !p.Enabled {
+			continue
+		}
+		expanded := false
+		if p.Qwen != nil {
+			for k := range p.Qwen.ModelMap {
+				add(k)
+			}
+			if len(p.Qwen.ModelMap) > 0 {
+				expanded = true
+			}
+		}
+		if p.DeepSeek != nil {
+			for k := range p.DeepSeek.ModelMap {
+				add(k)
+			}
+			if len(p.DeepSeek.ModelMap) > 0 {
+				expanded = true
+			}
+		}
+		if p.Zai != nil {
+			for k := range p.Zai.ModelMap {
+				add(k)
+			}
+			if len(p.Zai.ModelMap) > 0 {
+				expanded = true
+			}
+		}
+		if !expanded {
+			for _, m := range p.Models {
+				add(m)
+			}
+		}
+	}
+	if models == nil {
+		models = []string{}
+	}
+	writeJSON(w, 200, models)
+}
+
+// requestLogRow mirrors metrics.RequestLogRow without importing the package.
+type requestLogRow struct {
+	T         int64  `json:"t"`
+	AccountID string `json:"accountId"`
+	Model     string `json:"model"`
+	Status    int    `json:"status"`
+	LatencyMs int    `json:"latencyMs"`
+}
+
+func decodeLogRows(in []any) []requestLogRow {
+	var out []requestLogRow
+	if b, err := json.Marshal(in); err == nil {
+		_ = json.Unmarshal(b, &out)
+	}
+	return out
+}
+
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 100, 1, 200)
-	writeJSON(w, 200, map[string]any{
-		"requests": s.deps.Metrics.RecentLogRequests(limit),
-		"events":   s.deps.Metrics.RecentEvents(50),
-	})
+	// Merged chronological feed: model requests + system events, newest first.
+	// Shape matches the dashboard: {time, kind, message, status?}.
+	var feed []logEntry
+	for _, rq := range decodeLogRows(s.deps.Metrics.RecentLogRequests(limit)) {
+		st := rq.Status
+		msg := rq.Model
+		if rq.AccountID != "" {
+			msg += " via " + rq.AccountID
+		}
+		feed = append(feed, logEntry{
+			Time:    time.UnixMilli(rq.T).Format("15:04:05"),
+			Kind:    "request",
+			Message: msg,
+			Status:  &st,
+		})
+	}
+	for _, ev := range s.deps.Metrics.RecentEvents(50) {
+		var tStr, kind, detail string
+		if b, err := json.Marshal(ev); err == nil {
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				if t, ok := m["t"].(float64); ok {
+					tStr = time.UnixMilli(int64(t)).Format("15:04:05")
+				}
+				if k, ok := m["kind"].(string); ok {
+					kind = k
+				}
+				if d, ok := m["detail"].(string); ok {
+					detail = d
+				}
+			}
+		}
+		if tStr == "" {
+			continue
+		}
+		feed = append(feed, logEntry{Time: tStr, Kind: kind, Message: detail})
+	}
+	if feed == nil {
+		feed = []logEntry{}
+	}
+	writeJSON(w, 200, feed)
+}
+
+// logEntry is the dashboard-friendly log row.
+type logEntry struct {
+	Time    string `json:"time"`
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+	Status  *int   `json:"status,omitempty"`
 }
 
 func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request) {
@@ -188,8 +354,8 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
-	// Never leak keys: status view only.
-	writeJSON(w, 200, map[string]any{"accounts": s.deps.Pool.Status()})
+	// Never leak keys: status view only. Bare array for the dashboard.
+	writeJSON(w, 200, s.deps.Pool.Status())
 }
 
 func qwenBaseURL(s *Server, body map[string]any) string {
@@ -651,7 +817,7 @@ func nextAccountID(accounts []AccountConfig, prefix string) string {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"providers": s.deps.Providers.Load()})
+	writeJSON(w, 200, s.deps.Providers.Load())
 }
 
 func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
@@ -997,12 +1163,22 @@ func min(a, b int) int {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListProxies(w http.ResponseWriter, r *http.Request) {
+	// Bare array of {url, healthy} for the dashboard.
 	st := s.deps.Rotator.Status()
-	writeJSON(w, 200, map[string]any{
-		"proxies": s.deps.Proxies.Read(), "current": st.Current,
-		"currentIndex": st.CurrentIndex, "rotations": st.Rotations,
-		"count": st.Proxies, "health": st.Health,
-	})
+	healthByURL := map[string]bool{}
+	for _, h := range st.Health {
+		healthByURL[h.Proxy] = h.Healthy
+	}
+	urls := s.deps.Proxies.Read()
+	out := make([]map[string]any, 0, len(urls))
+	for _, u := range urls {
+		healthy, ok := healthByURL[u]
+		if !ok {
+			healthy = true // unchecked = assumed healthy
+		}
+		out = append(out, map[string]any{"url": u, "healthy": healthy})
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) handleSetProxies(w http.ResponseWriter, r *http.Request) {
@@ -1244,14 +1420,8 @@ func redactSettings(st Settings) map[string]any {
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	st := s.deps.Settings.Get()
-	writeJSON(w, 200, map[string]any{
-		"settings":          redactSettings(st),
-		"adminTokenSet":     st.AdminToken != "",
-		"clientTokensCount": len(st.ClientTokens),
-		"alertWebhookSet":   st.AlertWebhookUrl != "",
-		"settingsFile":      s.deps.Settings.FilePath(),
-	})
+	// Bare settings object for the dashboard.
+	writeJSON(w, 200, redactSettings(s.deps.Settings.Get()))
 }
 
 func (s *Server) handlePostSettings(w http.ResponseWriter, r *http.Request) {
