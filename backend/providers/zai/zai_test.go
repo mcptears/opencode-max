@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -451,5 +452,111 @@ func TestFlattenMessages(t *testing.T) {
 	}
 	if got[0].Content != "hi\nagain" || got[1].Role != "assistant" {
 		t.Fatalf("unexpected flatten: %+v", got)
+	}
+}
+
+func TestGLMFreeAPIMethod(t *testing.T) {
+	// Verifies the request matches the GLM-Free-API method exactly:
+	// headers (x-region: overseas), body shape, 401 retry, chat deletion.
+	var (
+		mu            sync.Mutex
+		gotRegion     string
+		gotSig        string
+		gotBody       map[string]any
+		deleteCalls   []string
+		completions   int
+		validateCalls int
+	)
+	// Build a fake JWT: {"id":"user123","email":"test@example.com"}
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"id":"user123","email":"test@example.com"}`))
+	token := "header." + payload + ".sig"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/api/v1/auths/":
+			validateCalls++
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"token":"` + token + `"}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v2/chat/completions"):
+			completions++
+			if completions == 1 {
+				// First attempt: 401 to trigger re-validate + retry.
+				w.WriteHeader(401)
+				return
+			}
+			gotRegion = r.Header.Get("X-Region")
+			gotSig = r.Header.Get("X-Signature")
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"data\":{\"delta_content\":\"hi\"}}\n\ndata: {\"data\":{\"phase\":\"done\"}}\n\n"))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/chats/"):
+			deleteCalls = append(deleteCalls, r.URL.Path)
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, token, srv.Client())
+	ctx := context.Background()
+	thinking, answer, err := c.Chat(ctx, "glm-5.3-flash",
+		[]ChatMessage{{Role: "user", Content: "hello"}}, true, false)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if answer != "hi" {
+		t.Fatalf("answer = %q", answer)
+	}
+	if thinking != "" {
+		t.Fatalf("thinking = %q", thinking)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotRegion != "overseas" {
+		t.Fatalf("X-Region = %q, want overseas", gotRegion)
+	}
+	if gotSig == "" {
+		t.Fatal("X-Signature missing")
+	}
+	// Body shape per GLM-Free-API.
+	for _, k := range []string{"model", "chat_id", "messages", "signature_prompt", "stream", "captcha_verify_param", "features"} {
+		if _, ok := gotBody[k]; !ok {
+			t.Fatalf("body missing %q: %v", k, gotBody)
+		}
+	}
+	for _, k := range []string{"params", "extra", "variables", "background_tasks"} {
+		if _, ok := gotBody[k]; ok {
+			t.Fatalf("body should not contain %q", k)
+		}
+	}
+	feats, _ := gotBody["features"].(map[string]any)
+	if feats["web_search"] != false {
+		t.Fatalf("web_search should be false, got %v", feats["web_search"])
+	}
+	if feats["image_generation"] != false {
+		t.Fatalf("image_generation should be false, got %v", feats["image_generation"])
+	}
+	if feats["auto_web_search"] != false {
+		t.Fatalf("auto_web_search should be false when search disabled, got %v", feats["auto_web_search"])
+	}
+	// 401 retry: 2 completion attempts + 1 re-validation.
+	if completions != 2 {
+		t.Fatalf("completions = %d, want 2 (401 retry)", completions)
+	}
+	if validateCalls != 1 {
+		t.Fatalf("validateCalls = %d, want 1", validateCalls)
+	}
+	// Chat deletion after completion.
+	if len(deleteCalls) != 1 {
+		t.Fatalf("deleteCalls = %v, want 1", deleteCalls)
+	}
+	if !strings.HasPrefix(deleteCalls[0], "/api/v1/chats/") {
+		t.Fatalf("delete path = %q", deleteCalls[0])
 	}
 }
