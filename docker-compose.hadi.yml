@@ -1,0 +1,23 @@
+# Hadi — opencode-max Go + React rewrite.
+services:
+  hadi:
+    build:
+      context: .
+      dockerfile: Dockerfile.hadi
+    image: opencode-max-hadi:latest
+    container_name: opencode-max-hadi
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      # JSON state lives in ./data on the host; the *_FILE env vars point the
+      # Go config at them (defaults are CWD-relative, i.e. /app/*.json).
+      - ./data:/app/data
+    environment:
+      PORT: "8080"
+      UPSTREAM_BASE: "${UPSTREAM_BASE:-https://opencode.ai/zen/v1}"
+      CLIENT_TOKENS: "${CLIENT_TOKENS:-}"
+      ACCOUNTS_FILE: /app/data/accounts.json
+      PROVIDERS_FILE: /app/data/providers.json
+      PROXIES_FILE: /app/data/proxies.json
+      SETTINGS_FILE: /app/data/settings.json
