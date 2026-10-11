@@ -581,6 +581,18 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       // Upgrade path: replace a legacy self-hosted qwen2api entry (127.0.0.1:8765)
       // with the native provider. Accounts keep working (same provider id).
       if (!existing.baseUrl.includes('8765')) {
+        // Refresh stale model ids on the native provider too.
+        const qwen = (existing as { qwen?: { defaultModel?: string; modelMap?: Record<string, string> } }).qwen;
+        const needsRefresh = qwen?.defaultModel !== QWEN_PRESET.qwen?.defaultModel ||
+          JSON.stringify(Object.keys(qwen?.modelMap ?? {}).sort()) !== JSON.stringify(Object.keys(QWEN_PRESET.qwen?.modelMap ?? {}).sort());
+        if (needsRefresh) {
+          const i = providers.indexOf(existing);
+          providers[i] = { ...existing, ...QWEN_PRESET, name: existing.name || QWEN_PRESET.name };
+          saveProviders(providers);
+          metrics.record('settings', 'qwen provider models refreshed');
+          res.json({ ok: true, upgraded: true, provider: QWEN_PRESET });
+          return;
+        }
         res.status(409).json({ error: { message: 'qwen provider already exists', status: 409 } });
         return;
       }
