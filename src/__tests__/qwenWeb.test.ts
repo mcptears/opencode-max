@@ -48,8 +48,8 @@ beforeAll(async () => {
       }
       if (url.startsWith('/api/v2/chat/completions') && req.method === 'POST') {
         lastCompletionBody = JSON.parse(body);
-        // Auth must ride on Cookie or Bearer with source: web.
-        if (req.headers['source'] !== 'web') {
+        // Auth must ride on Bearer token (logged-in).
+        if (!String(req.headers['authorization'] || '').startsWith('Bearer ')) {
           res.writeHead(400).end('{}');
           return;
         }
