@@ -157,10 +157,11 @@ async function headers(credential: string, cookies?: string): Promise<Record<str
     'user-agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
   };
-  // Baxia always (WAF bypass).
+  // Baxia (WAF bypass) + Bearer token (the login) + cookies. All three.
   const baxia = await qwenBaxiaHeaders();
   if (baxia['bx-umidtoken']) Object.assign(h, baxia);
-  // Logged-in: cookies authenticate the account.
+  const cred = credential?.trim();
+  if (cred) Object.assign(h, qwenAuthHeaders(cred));
   if (cookies?.trim()) h['Cookie'] = cookies.trim();
   return h;
 }
