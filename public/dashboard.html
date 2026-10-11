@@ -254,7 +254,7 @@
           <div class="modal-head"><h3>Connect Z.ai account</h3><button class="btn" id="zaiConnectClose">✕</button></div>
           <ol class="steps">
             <li><strong>Sign in</strong> at <a href="https://chat.z.ai" target="_blank" rel="noopener">chat.z.ai</a> in your browser — solve the captcha there (one time).</li>
-            <li><strong>Copy your token:</strong> open DevTools (F12) → Application → Local Storage → <code>https://chat.z.ai</code> → copy the <code>token</code> value.</li>
+            <li><strong>Copy your token:</strong> open DevTools (F12) → Console → run <code>localStorage.getItem("token")</code> and copy the value (no quotes).</li>
             <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
           </ol>
           <form id="zaiConnectForm" class="form-grid">
