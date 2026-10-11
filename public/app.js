@@ -199,7 +199,7 @@ function renderStatus(s) {
   $('#proxyHint').textContent = `${s.ip.proxies} configured · ${s.ip.rotations} rotations total`;
   renderProxyList(s);
 
-  renderEvents();
+  renderLogs();
   const port = location.port || '8080';
   $('#opencodeSnippet').textContent =
 `// ~/.config/opencode/opencode.jsonc
@@ -216,11 +216,15 @@ function renderStatus(s) {
 }`;
 }
 
-async function renderEvents() {
+async function renderLogs() {
   try {
-    const d = await (await api('/api/metrics')).json();
-    $('#eventsList').innerHTML = d.events.map((e) =>
-      `<li><span class="t">${fmtTime(e.t)}</span><span class="k k-${e.kind}">${e.kind.replace(/_/g, ' ')}</span>${esc(e.detail)}</li>`).join('') || '<li class="hint">no events yet</li>';
+    const d = await (await api('/api/logs?limit=100')).json();
+    // Merge requests + events by timestamp, newest first.
+    const all = [
+      ...(d.requests || []).map((r) => ({ t: r.ts, html: `<li><span class="t">${fmtTime(r.ts)}</span><span class="k k-request">${r.status}</span>${esc(r.model || '—')} <span class="hint">via ${esc(r.account_id)} · ${r.latency_ms}ms</span></li>` })),
+      ...(d.events || []).map((e) => ({ t: e.t, html: `<li><span class="t">${fmtTime(e.t)}</span><span class="k k-${e.kind}">${e.kind.replace(/_/g, ' ')}</span>${esc(e.detail)}</li>` })),
+    ].sort((a, b) => b.t - a.t).slice(0, 100);
+    $('#logsList').innerHTML = all.map((x) => x.html).join('') || '<li class="hint">no logs yet</li>';
   } catch { /* ignore */ }
 }
 
