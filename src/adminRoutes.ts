@@ -39,6 +39,7 @@ function validateAccount(a: unknown): { ok: true; account: AccountConfig } | { o
     provider: (r.provider as string).trim(),
     apiKey: (r.apiKey as string).trim(),
     priority: r.priority as number,
+    cookies: typeof r.cookies === 'string' && r.cookies.trim() ? r.cookies.trim() : undefined,
     cooldownPeriod: typeof r.cooldownPeriod === 'number' && r.cooldownPeriod > 0 ? r.cooldownPeriod : undefined,
     baseUrl: typeof r.baseUrl === 'string' && (r.baseUrl as string).trim() ? (r.baseUrl as string).trim() : undefined,
     quotaLimit:
@@ -219,8 +220,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
 
   /** Validate a DeepSeek userToken without adding it. */
   router.post('/api/accounts/validate-deepseek', async (req, res) => {
-    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown };
+    const body = jsonBody(req) as { credential?: unknown; baseUrl?: unknown; cookies?: unknown };
     const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+    const cookies = typeof body.cookies === 'string' ? body.cookies.trim() : undefined;
     if (!credential) {
       res.status(400).json({ ok: false, error: 'credential is required' });
       return;
@@ -229,7 +231,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       typeof body.baseUrl === 'string' && body.baseUrl.trim()
         ? body.baseUrl.trim().replace(/\/+$/, '')
         : (loadProviders().find((p) => p.protocol === 'deepseek-web')?.baseUrl ?? 'https://chat.deepseek.com');
-    const r = await validateDeepSeekCredential(base, credential);
+    const r = await validateDeepSeekCredential(base, credential, {}, cookies);
     res.json(r);
   });
 
@@ -621,6 +623,25 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     saveProviders(providers);
     metrics.record('settings', 'native deepseek provider preset added');
     res.status(201).json({ ok: true, provider: DEEPSEEK_PRESET });
+  });
+
+  /** One-click restore: the default OpenCode Zen provider. */
+  router.post('/api/providers/preset/opencode-zen', (_req, res) => {
+    const providers = loadProviders();
+    if (providers.some((p) => p.id === 'opencode-zen')) {
+      res.status(409).json({ error: { message: 'opencode-zen provider already exists', status: 409 } });
+      return;
+    }
+    providers.push({
+      id: 'opencode-zen',
+      name: 'OpenCode Zen',
+      baseUrl: getSettings().upstreamBase,
+      models: ['*'],
+      enabled: true,
+    });
+    saveProviders(providers);
+    metrics.record('settings', 'opencode-zen provider restored');
+    res.json({ ok: true, provider: providers[providers.length - 1] });
   });
 
   /** One-click preset: native Z.ai web provider (built into opencode-max). */
