@@ -204,7 +204,7 @@
             <form id="qwenConnectForm" class="form-grid two-col">
               <label>Display name<input name="name" placeholder="e.g. Qwen main"></label>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
-              <label class="span2">Qwen token <span class="hint">from localStorage — DevTools (F12) → Console → <code>localStorage.getItem("token")</code>, copy without quotes</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label class="span2">Qwen token <span class="hint">(optional — cookies do the auth)</span><input name="credential" type="password" placeholder="paste token here (optional)" autocomplete="off"></label>
               <label class="span2">Session cookies <span class="hint">(required — token alone won't work) — Console → <code>document.cookie</code>, copy the whole string</span><textarea name="cookies" rows="2" placeholder="paste cookies here" autocomplete="off" style="font-family:monospace"></textarea></label>
               <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
