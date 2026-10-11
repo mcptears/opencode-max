@@ -1,0 +1,32 @@
+# Hadi — opencode-max Go + React rewrite.
+# Multi-stage build: React frontend -> Go backend -> minimal runtime.
+
+# ---- Stage 1: React frontend ----
+FROM node:20-alpine AS frontend
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- Stage 2: Go backend ----
+FROM golang:1.23-alpine AS backend
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /app/hadi-server .
+
+# ---- Stage 3: runtime ----
+FROM alpine:3.20
+WORKDIR /app
+COPY --from=backend /app/hadi-server /app/hadi-server
+COPY --from=frontend /frontend/dist /app/frontend/dist
+# Data dir for accounts.json / providers.json / proxies.json / settings.json
+# (override locations with ACCOUNTS_FILE, PROVIDERS_FILE, PROXIES_FILE, SETTINGS_FILE).
+RUN mkdir -p /app/data
+ENV FRONTEND_DIST=/app/frontend/dist
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1
+CMD ["/app/hadi-server"]
