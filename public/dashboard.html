@@ -184,7 +184,7 @@
       </div>
 
       <div class="modal-backdrop" id="qwenConnectModal" hidden>
-        <div class="modal">
+        <div class="modal connect">
           <div class="modal-head"><h3>Connect Qwen account</h3><button class="btn" id="qwenConnectClose">✕</button></div>
           <div style="display:flex;gap:8px;margin:4px 0 12px">
             <button class="tab on" data-qtab="signin">Sign in</button>
@@ -200,17 +200,12 @@
             </form>
           </div>
           <div id="qtab-token" hidden>
-            <ol class="steps">
-              <li><strong>Sign in</strong> at <a href="https://chat.qwen.ai" target="_blank" rel="noopener">chat.qwen.ai</a> in your browser.</li>
-              <li><strong>Copy your token:</strong> open DevTools (F12) → Console → run <code>localStorage.getItem("token")</code> and copy the value (no quotes).</li>
-              <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
-            </ol>
-            <form id="qwenConnectForm" class="form-grid">
+            <p class="hint" style="margin:0 0 12px">Sign in at <a href="https://chat.qwen.ai" target="_blank" rel="noopener">chat.qwen.ai</a> in your browser, then paste the token and cookies below — validated live before anything is saved.</p>
+            <form id="qwenConnectForm" class="form-grid two-col">
               <label>Display name<input name="name" placeholder="e.g. Qwen main"></label>
-              <label>Qwen token <span class="hint">from localStorage</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
-              <label>Session cookies <span class="hint">(required — token alone won't work)</span><textarea name="cookies" rows="3" placeholder="paste cookies here (document.cookie from chat.qwen.ai)" autocomplete="off" style="font-family:monospace"></textarea></label>
-              <div class="hint">In your browser at chat.qwen.ai: DevTools (F12) → Console → run <code>document.cookie</code> → copy the whole string.</div>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+              <label class="span2">Qwen token <span class="hint">from localStorage — DevTools (F12) → Console → <code>localStorage.getItem("token")</code>, copy without quotes</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label class="span2">Session cookies <span class="hint">(required — token alone won't work) — Console → <code>document.cookie</code>, copy the whole string</span><textarea name="cookies" rows="2" placeholder="paste cookies here" autocomplete="off" style="font-family:monospace"></textarea></label>
               <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
             </form>
@@ -220,7 +215,7 @@
       </div>
 
       <div class="modal-backdrop" id="dsConnectModal" hidden>
-        <div class="modal">
+        <div class="modal connect">
           <div class="modal-head"><h3>Connect DeepSeek account</h3><button class="btn" id="dsConnectClose">✕</button></div>
           <div style="display:flex;gap:8px;margin:4px 0 12px">
             <button class="tab on" data-dstab="signin">Sign in</button>
@@ -244,17 +239,12 @@
             </form>
           </div>
           <div id="dstab-token" hidden>
-            <ol class="steps">
-              <li><strong>Sign in</strong> at <a href="https://chat.deepseek.com" target="_blank" rel="noopener">chat.deepseek.com</a> in your browser.</li>
-              <li><strong>Copy your token:</strong> open DevTools (F12) → Console → run <code>JSON.parse(localStorage.getItem("userToken")).value</code> and copy the value (no quotes).</li>
-              <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
-            </ol>
-            <form id="dsConnectForm" class="form-grid">
+            <p class="hint" style="margin:0 0 12px">Sign in at <a href="https://chat.deepseek.com" target="_blank" rel="noopener">chat.deepseek.com</a>, then paste the token and cookies below — validated live before anything is saved.</p>
+            <form id="dsConnectForm" class="form-grid two-col">
               <label>Display name<input name="name" placeholder="e.g. DeepSeek main"></label>
-              <label>DeepSeek token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
-              <label>Session cookies <span class="hint">(required — token alone won't work)</span><textarea name="cookies" rows="3" placeholder="paste cookies here (document.cookie from chat.deepseek.com)" autocomplete="off" style="font-family:monospace"></textarea></label>
-              <div class="hint">In your browser at chat.deepseek.com: DevTools (F12) → Console → run <code>document.cookie</code> → copy the whole string.</div>
               <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+              <label class="span2">DeepSeek token <span class="hint">— Console → <code>JSON.parse(localStorage.getItem("userToken")).value</code>, copy without quotes</span><input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
+              <label class="span2">Session cookies <span class="hint">(required — token alone won't work) — Console → <code>document.cookie</code>, copy the whole string</span><textarea name="cookies" rows="2" placeholder="paste cookies here" autocomplete="off" style="font-family:monospace"></textarea></label>
               <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
               <button class="btn primary" type="submit">Validate &amp; connect</button>
             </form>
@@ -264,17 +254,13 @@
       </div>
 
       <div class="modal-backdrop" id="zaiConnectModal" hidden>
-        <div class="modal">
+        <div class="modal connect">
           <div class="modal-head"><h3>Connect Z.ai account</h3><button class="btn" id="zaiConnectClose">✕</button></div>
-          <ol class="steps">
-            <li><strong>Sign in</strong> at <a href="https://chat.z.ai" target="_blank" rel="noopener">chat.z.ai</a> in your browser — solve the captcha there (one time).</li>
-            <li><strong>Copy your token:</strong> open DevTools (F12) → Console → run <code>localStorage.getItem("token")</code> and copy the value (no quotes).</li>
-            <li><strong>Paste it below</strong> — it's validated live before anything is saved.</li>
-          </ol>
-          <form id="zaiConnectForm" class="form-grid">
+          <p class="hint" style="margin:0 0 12px">Sign in at <a href="https://chat.z.ai" target="_blank" rel="noopener">chat.z.ai</a> (solve the captcha once), then DevTools (F12) → Console → <code>localStorage.getItem("token")</code> — paste below, validated live.</p>
+          <form id="zaiConnectForm" class="form-grid two-col">
             <label>Display name<input name="name" placeholder="e.g. Z.ai main"></label>
-            <label>Z.ai token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
             <label>Priority<input name="priority" type="number" min="1" value="1"></label>
+            <label class="span2">Z.ai token<input name="credential" type="password" required placeholder="paste token here" autocomplete="off"></label>
             <label class="check"><input name="useProxy" type="checkbox"> Route through proxy</label>
             <button class="btn primary" type="submit">Validate &amp; connect</button>
           </form>
