@@ -106,11 +106,23 @@ Four upstream protocols, selected per provider:
 | `openai`       | Any OpenAI-compatible base URL (default: OpenCode Zen) | Bearer API key |
 | `qwen-web`     | chat.qwen.ai (native) | Paste token + session cookies from your browser |
 | `deepseek-web` | chat.deepseek.com (native) | Email+password sign-in (verification-code flow supported) or paste token + cookies |
-| `zai-web`      | chat.z.ai (native)    | Paste JWT from Local Storage |
+| `zai-web`      | chat.z.ai (native)    | Paste JWT from Local Storage; device tokens auto-harvested (see below) |
 
 Accounts connect from the dashboard — no JSON editing, no separate
 deployments. Use **+ Add provider → Built-in** to restore a deleted default
 provider without touching its accounts.
+
+### Z.ai device tokens (automatic)
+
+Z.ai requires a captcha token per request. Hadi harvests them automatically —
+no DevTools needed:
+
+1. Build the collector: `cd backend && go build -o zai-collect ./cmd/zai-collect`
+2. Install the browser once: `playwright install chromium` (or `go run github.com/mxschmitt/playwright-go/cmd/playwright@latest install chromium`)
+3. Run it: `./zai-collect --count 20` — or click **Collect 20 tokens** on the Setup page, which runs it in the background.
+
+Tokens pool in SQLite (single-use, FIFO). The zai provider consumes them
+automatically; a per-account `deviceToken` still overrides the pool if set.
 
 ## Docker
 
