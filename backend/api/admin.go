@@ -73,6 +73,11 @@ func (s *Server) registerAdmin(r chi.Router) {
 	r.Get("/scraper/providers", s.handleListScraperProviders)
 	r.Get("/scraper/status", s.handleScraperStatus)
 	r.Post("/scraper/run", s.handleScraperRun)
+
+	// ---- z.ai device tokens (auto-harvested pool for captcha) ----
+	r.Get("/zai/tokens", s.handleZaiTokensStatus)
+	r.Post("/zai/tokens/collect", s.handleZaiTokensCollect)
+	r.Delete("/zai/tokens", s.handleZaiTokensClear)
 	r.Post("/scraper/providers", s.handleCreateScraperProvider)
 	r.Put("/scraper/providers/{id}", s.handleUpdateScraperProvider)
 	r.Delete("/scraper/providers/{id}", s.handleDeleteScraperProvider)
@@ -1287,6 +1292,41 @@ func (s *Server) handleScraperRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]any{"ok": true, "started": true})
+}
+
+// ---- Z.ai device tokens ----
+
+func (s *Server) handleZaiTokensStatus(w http.ResponseWriter, r *http.Request) {
+	count := 0
+	if s.deps.ZaiTokens != nil {
+		count = s.deps.ZaiTokens.Count()
+	}
+	writeJSON(w, 200, map[string]any{
+		"count":       count,
+		"collecting":  zaiCollectRunning.Load(),
+		"collectLog":  zaiCollectLog(),
+	})
+}
+
+func (s *Server) handleZaiTokensClear(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ZaiTokens != nil {
+		if err := s.deps.ZaiTokens.Clear(); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (s *Server) handleZaiTokensCollect(w http.ResponseWriter, r *http.Request) {
+	if zaiCollectRunning.Load() {
+		writeError(w, 409, "collection already running")
+		return
+	}
+	count := queryInt(r, "count", 20, 1, 200)
+	zaiCollectRunning.Store(true)
+	go runZaiCollect(count)
+	writeJSON(w, 202, map[string]any{"ok": true, "started": true, "count": count})
 }
 
 var scraperFormats = map[string]bool{"text": true, "geonode": true, "spys": true, "fpl": true, "proxynova": true}
