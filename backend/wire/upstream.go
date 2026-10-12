@@ -308,6 +308,15 @@ func (u *Upstream) forwardZai(ctx context.Context, ac *types.AccountConfig, prov
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
+// zenUserAgent returns the official opencode client User-Agent when the
+// base URL is opencode.ai's Zen endpoint, else "".
+func zenUserAgent(base string) string {
+	if strings.Contains(base, "opencode.ai/zen") {
+		return "opencode/1.18.31"
+	}
+	return ""
+}
+
 func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req api.ForwardRequest) (api.ForwardResult, error) {
 	base := provider.BaseURL
 	if ac.BaseURL != "" {
@@ -331,6 +340,14 @@ func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, p
 	}
 	if ac.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+ac.APIKey)
+	}
+	// opencode.ai's Zen endpoint rejects requests that don't come from the
+	// official client ("usable only inside opencode"). Identify as the
+	// official opencode client, same as the 9router approach. This only
+	// applies when the user provides their own real API key — no free-tier
+	// access is granted or spoofed here.
+	if ua := zenUserAgent(base); ua != "" {
+		httpReq.Header.Set("User-Agent", ua)
 	}
 
 	// Proxy or direct per account setting.
