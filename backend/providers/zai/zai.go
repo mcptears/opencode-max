@@ -74,14 +74,24 @@ func webErrorf(status int, format string, args ...any) *WebError {
 
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
+// TokenPool supplies single-use device tokens (FIFO). The zai provider
+// consumes from it automatically when an account has no per-account
+// device token. Implemented by zaitokens.Store.
+type TokenPool interface {
+	Take() (string, bool)
+}
+
 // Client is a Z.ai web API client. Credential is the JWT from
 // chat.z.ai localStorage ("token"). DeviceToken is the Aliyun device
 // fingerprint (window.z_um.getToken() in the browser at chat.z.ai) used to
-// generate captcha_verify_param for each request.
+// generate captcha_verify_param for each request. When DeviceToken is empty,
+// the client takes a single-use token from Pool (harvested automatically by
+// the zai-collect helper).
 type Client struct {
 	BaseURL     string
 	Credential  string
 	DeviceToken string
+	Pool        TokenPool
 	HTTP        *http.Client
 	SaltKey     string
 	FEVersion   string
@@ -564,9 +574,16 @@ func (c *Client) postChatOnce(ctx context.Context, model string, messages []Chat
 		}
 	}
 	sig := SignRequest(prompt, strings.TrimSpace(c.Credential), id.ID, c.SaltKey)
-	// captcha_verify_param is required — generated via the Aliyun flow
-	// using the account's device token (same method as GLM-Free-API).
-	captchaParam, err := ComputeCaptchaParam(c.HTTP, c.DeviceToken)
+	// captcha_verify_param is required — generated via the Aliyun flow.
+	// The device token comes from the account, else from the auto-harvested
+	// pool (same method as the reference bridge: single-use FIFO tokens).
+	deviceToken := strings.TrimSpace(c.DeviceToken)
+	if deviceToken == "" && c.Pool != nil {
+		if tok, ok := c.Pool.Take(); ok {
+			deviceToken = tok
+		}
+	}
+	captchaParam, err := ComputeCaptchaParam(c.HTTP, deviceToken)
 	if err != nil {
 		return nil, "", webErrorf(429, "z.ai captcha failed: %s", err.Error())
 	}
