@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { Account } from '../api/client';
+import ConnectAccount from '../components/ConnectAccount';
+
+const CONNECTABLE = [
+  { id: 'qwen', name: 'Qwen' },
+  { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'zai', name: 'Z.ai' },
+  { id: 'opencode-zen', name: 'OpenCode Zen' },
+];
 
 export default function Accounts() {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [connectProvider, setConnectProvider] = useState<{ id: string; name: string } | null>(null);
 
   const load = () => api.get<Account[]>('/api/accounts').then(setAccounts).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -23,7 +33,8 @@ export default function Accounts() {
     <div>
       <h1 className="page-title">Accounts</h1>
       <p className="page-sub">Connected provider accounts</p>
-      <div className="card">
+      <button className="btn btn-primary" onClick={() => setShowPicker(true)}>+ Connect account</button>
+      <div className="card" style={{ marginTop: 16 }}>
         <div className="table-wrap">
           <table>
             <thead>
@@ -55,6 +66,35 @@ export default function Accounts() {
           </table>
         </div>
       </div>
+
+      {showPicker && (
+        <div className="modal-overlay" onClick={() => setShowPicker(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <h2>Choose provider</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+              {CONNECTABLE.map((p) => (
+                <button
+                  key={p.id}
+                  className="btn btn-ghost"
+                  onClick={() => { setShowPicker(false); setConnectProvider(p); }}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <button className="btn btn-ghost" style={{ marginTop: 16, width: '100%' }} onClick={() => setShowPicker(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {connectProvider && (
+        <ConnectAccount
+          providerId={connectProvider.id}
+          providerName={connectProvider.name}
+          onClose={() => setConnectProvider(null)}
+          onDone={load}
+        />
+      )}
     </div>
   );
 }
