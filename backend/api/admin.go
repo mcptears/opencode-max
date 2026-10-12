@@ -423,7 +423,15 @@ func (s *Server) handleQwenLogin(w http.ResponseWriter, r *http.Request) {
 		qwenProvider = &preset
 		s.deps.Metrics.Record("settings", "native qwen provider preset added (via Qwen sign-in)")
 	}
-	login := s.deps.WebAuth.QwenSignIn(r.Context(), qwenProvider.BaseURL, email, hash)
+	// Prefer the automated browser login when the raw password is available
+	// (harvests the session token via headless Chromium — no DevTools needed).
+	// Falls back to the hash-based API sign-in otherwise.
+	var login SignInResult
+	if rawPassword, _ := body["password"].(string); strings.TrimSpace(rawPassword) != "" {
+		login = s.deps.WebAuth.QwenBrowserSignIn(r.Context(), email, rawPassword)
+	} else {
+		login = s.deps.WebAuth.QwenSignIn(r.Context(), qwenProvider.BaseURL, email, hash)
+	}
 	if !login.OK {
 		writeJSON(w, 200, login)
 		return
