@@ -1,14 +1,39 @@
 package wire
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/mcptears/opencode-max/api"
 	"github.com/mcptears/opencode-max/providers/deepseek"
 	"github.com/mcptears/opencode-max/providers/qwen"
 	"github.com/mcptears/opencode-max/providers/zai"
 )
+
+// findHelperBinary locates a helper binary (qwen-login, zai-collect) next to
+// the server binary, else on PATH.
+func findHelperBinary(name string) string {
+	if exe, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(exe), name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+		if _, err := os.Stat(cand + ".exe"); err == nil {
+			return cand + ".exe"
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return ""
+}
 
 // ---------------------------------------------------------------------------
 // WebAuth: native web-provider credential flows -> api.WebAuth
@@ -30,6 +55,41 @@ func (w *WebAuth) QwenSignIn(ctx context.Context, baseURL, email, passwordHash s
 	// The TS implementation signs in via Qwen's auth API; the Go qwen client
 	// does not yet implement password login. Return a clear error.
 	return api.SignInResult{Error: "qwen password sign-in not implemented in Go rewrite — use paste-token"}
+}
+
+// QwenBrowserSignIn runs the qwen-login helper (headless Chromium) to sign in
+// with the raw password and harvest the session token from localStorage.
+func (w *WebAuth) QwenBrowserSignIn(ctx context.Context, email, password string) api.SignInResult {
+	bin := findHelperBinary("qwen-login")
+	if bin == "" {
+		return api.SignInResult{Error: "qwen-login helper not found — build it: go build -o qwen-login ./cmd/qwen-login"}
+	}
+	type loginOut struct {
+		OK       bool   `json:"ok"`
+		Token    string `json:"token"`
+		Cookies  string `json:"cookies"`
+		Error    string `json:"error"`
+		NeedCode bool   `json:"needCode"`
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, bin, "--email", email, "--password", password)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	_ = cmd.Run()
+	var out loginOut
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &out); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = "qwen-login produced no output"
+		}
+		return api.SignInResult{Error: msg}
+	}
+	if !out.OK {
+		return api.SignInResult{Error: out.Error, NeedCode: out.NeedCode}
+	}
+	return api.SignInResult{OK: true, Credential: out.Token, Cookies: out.Cookies}
 }
 
 func (w *WebAuth) ValidateDeepSeek(ctx context.Context, baseURL, credential, cookies string) api.ValidationResult {
