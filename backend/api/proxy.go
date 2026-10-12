@@ -205,6 +205,9 @@ func (s *Server) aggregateModels(ctx context.Context) []any {
 			if acct != nil && acct.APIKey != "" {
 				req.Header.Set("Authorization", "Bearer "+acct.APIKey)
 			}
+			if strings.Contains(p.BaseURL, "opencode.ai/zen") {
+				req.Header.Set("User-Agent", "opencode/1.18.31")
+			}
 			rt := s.deps.Rotator.RoundTripperFor(s.deps.Rotator.Current(), s.deps.Rotator.CurrentFamily())
 			client := &http.Client{Transport: rt}
 			resp, err := client.Do(req)
