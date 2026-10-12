@@ -3,6 +3,8 @@ package proxy
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -197,5 +199,53 @@ func TestStatus(t *testing.T) {
 	}
 	if !st.Health[0].Healthy {
 		t.Fatal("unknown proxy should default to healthy")
+	}
+}
+
+func TestNormalizeProxyURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// The reseller format: user:pass@host:port with no scheme.
+		{"8hd8sve0rej6:4l9it8m43pv9u3y@104.207.60.60:3129", "http://8hd8sve0rej6:4l9it8m43pv9u3y@104.207.60.60:3129"},
+		{"104.207.60.60:3129", "http://104.207.60.60:3129"},
+		{"http://user:pass@host:8080", "http://user:pass@host:8080"},
+		{"https://host:8443", "https://host:8443"},
+		{"socks5://user:pass@host:1080", "socks5://user:pass@host:1080"},
+		{"", ""},
+		{"  ", ""},
+	}
+	for _, c := range cases {
+		if got := NormalizeProxyURL(c.in); got != c.want {
+			t.Errorf("NormalizeProxyURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeProxyURLParses(t *testing.T) {
+	// The normalized reseller format must parse into correct URL parts.
+	u, err := url.Parse(NormalizeProxyURL("8hd8sve0rej6:4l9it8m43pv9u3y@104.207.60.60:3129"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Scheme != "http" {
+		t.Errorf("scheme = %q", u.Scheme)
+	}
+	if u.User.Username() != "8hd8sve0rej6" {
+		t.Errorf("username = %q", u.User.Username())
+	}
+	if pw, _ := u.User.Password(); pw != "4l9it8m43pv9u3y" {
+		t.Errorf("password = %q", pw)
+	}
+	if u.Host != "104.207.60.60:3129" {
+		t.Errorf("host = %q", u.Host)
+	}
+}
+
+func TestRedactSchemeLess(t *testing.T) {
+	got := RedactProxy("8hd8sve0rej6:4l9it8m43pv9u3y@104.207.60.60:3129")
+	if strings.Contains(got, "4l9it8m43pv9u3y") {
+		t.Errorf("password leaked in %q", got)
+	}
+	if !strings.Contains(got, "104.207.60.60:3129") {
+		t.Errorf("host missing in %q", got)
 	}
 }
