@@ -124,6 +124,18 @@ no DevTools needed:
 Tokens pool in SQLite (single-use, FIFO). The zai provider consumes them
 automatically; a per-account `deviceToken` still overrides the pool if set.
 
+### Qwen auto sign-in (no DevTools)
+
+Qwen accounts sign in automatically via headless Chromium — the same approach
+as the qwen2api bridge:
+
+1. Build the helper: `cd backend && go build -o qwen-login ./cmd/qwen-login`
+2. Install the browser once (same `playwright install chromium` as above)
+3. From the dashboard or API: `POST /api/accounts/qwen-login` with
+   `{"email": "...", "password": "..."}` — the helper fills the login form at
+   chat.qwen.ai, harvests the session token from localStorage, and saves the
+   account. Paste-token still works as a fallback.
+
 ## Docker
 
 Docker packaging for the Go + React build is in progress
