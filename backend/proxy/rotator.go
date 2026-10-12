@@ -21,15 +21,37 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+// NormalizeProxyURL accepts the formats users actually paste:
+//   - user:pass@host:port   (no scheme; the common reseller format)
+//   - host:port
+//   - http://user:pass@host:port, https://..., socks5://...
+//
+// Scheme-less inputs get http:// prepended (the default for CONNECT proxies).
+// Returns "" for blank input.
+func NormalizeProxyURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if strings.Contains(s, "://") {
+		return s
+	}
+	return "http://" + s
+}
+
 // RedactProxy hides credentials when displaying proxy URLs.
 func RedactProxy(raw string) string {
-	u, err := url.Parse(raw)
+	u, err := url.Parse(NormalizeProxyURL(raw))
 	if err != nil {
 		if i := strings.Index(raw, "://"); i >= 0 {
 			rest := raw[i+3:]
 			if at := strings.Index(rest, "@"); at >= 0 {
 				return raw[:i+3] + "***@" + rest[at+1:]
 			}
+		}
+		// Scheme-less user:pass@host:port.
+		if at := strings.Index(raw, "@"); at >= 0 {
+			return "***@" + raw[at+1:]
 		}
 		return raw
 	}
@@ -128,9 +150,14 @@ func WithProxyDroppedHook(f func(proxy string, consecFails int)) Option {
 }
 
 // New creates a rotator over the given proxy URLs ("" = direct egress).
+// URLs are normalized (scheme-less user:pass@host:port gets http://).
 func New(proxies []string, opts ...Option) *Rotator {
+	normalized := make([]string, 0, len(proxies))
+	for _, p := range proxies {
+		normalized = append(normalized, NormalizeProxyURL(p))
+	}
 	r := &Rotator{
-		proxies:       append([]string{}, proxies...),
+		proxies:       normalized,
 		health:        make(map[string]*healthState),
 		quality:       make(map[string]*ProxyQuality),
 		familyMode:    FamilyAuto,
@@ -253,12 +280,17 @@ func (r *Rotator) Rotate() string {
 
 // SetProxies hot-swaps the proxy list (dashboard edits), keeping the
 // rotation position sane and dropping state for removed proxies.
+// URLs are normalized (scheme-less user:pass@host:port gets http://).
 func (r *Rotator) SetProxies(proxies []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.proxies = append([]string{}, proxies...)
-	keep := make(map[string]struct{}, len(proxies))
+	normalized := make([]string, 0, len(proxies))
 	for _, p := range proxies {
+		normalized = append(normalized, NormalizeProxyURL(p))
+	}
+	r.proxies = normalized
+	keep := make(map[string]struct{}, len(normalized))
+	for _, p := range normalized {
 		keep[p] = struct{}{}
 	}
 	for k := range r.health {
@@ -372,6 +404,7 @@ func directDialContext(family int) func(ctx context.Context, network, addr strin
 // golang.org/x/net/proxy, HTTP(S) via CONNECT handled by http.Transport), or
 // a direct family-pinned dialer when proxyURL is "".
 func dialContextFor(proxyURL string, family int) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	proxyURL = NormalizeProxyURL(proxyURL)
 	if proxyURL == "" {
 		return directDialContext(family)
 	}
@@ -401,6 +434,7 @@ func dialContextFor(proxyURL string, family int) func(ctx context.Context, netwo
 // Transport returns an *http.Transport routing through the given proxy
 // ("" = direct, family-pinned). Callers should reuse the returned transport.
 func (r *Rotator) Transport(proxyURL string) *http.Transport {
+	proxyURL = NormalizeProxyURL(proxyURL)
 	family := r.CurrentFamily()
 	tr := &http.Transport{
 		DialContext:           dialContextFor(proxyURL, family),
