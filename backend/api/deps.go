@@ -188,6 +188,12 @@ type UpstreamClient interface {
 
 // Deps wires the api package to the rest of the process. Fill it in main.go
 // once the sibling packages are implemented.
+// ZaiTokenStore is the auto-harvested device-token pool for Z.ai captcha.
+type ZaiTokenStore interface {
+	Count() int
+	Clear() error
+}
+
 type Deps struct {
 	Pool       AccountPool
 	Rotator    IpRotator
@@ -200,6 +206,7 @@ type Deps struct {
 	ScraperJob ScraperJob
 	WebAuth    WebAuth
 	Upstream   UpstreamClient
+	ZaiTokens  ZaiTokenStore
 	// ReinitFileLogger picks up logFile/rotation changes without a restart.
 	ReinitFileLogger func()
 }
