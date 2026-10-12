@@ -149,6 +149,9 @@ type SignInResult struct {
 type WebAuth interface {
 	ValidateQwen(ctx context.Context, baseURL, credential, cookies string) ValidationResult
 	QwenSignIn(ctx context.Context, baseURL, email, passwordHash string) SignInResult
+	// QwenBrowserSignIn performs an automated browser login (qwen-login
+	// helper) and returns the harvested session token. Needs the raw password.
+	QwenBrowserSignIn(ctx context.Context, email, password string) SignInResult
 	ValidateDeepSeek(ctx context.Context, baseURL, credential, cookies string) ValidationResult
 	DeepSeekSignIn(ctx context.Context, baseURL, email, passwordHash, verificationCode string) SignInResult
 	ResendDeepSeekCode(ctx context.Context, baseURL, email string) ValidationResult
