@@ -21,6 +21,7 @@ import (
 	"github.com/mcptears/opencode-max/providers"
 	"github.com/mcptears/opencode-max/proxy"
 	"github.com/mcptears/opencode-max/quota"
+	"github.com/mcptears/opencode-max/zaitokens"
 	"github.com/mcptears/opencode-max/store"
 	"github.com/mcptears/opencode-max/types"
 	"github.com/mcptears/opencode-max/wire"
@@ -81,6 +82,7 @@ func main() {
 		Metrics:   metricsAdapter,
 		DefaultCooldown: time.Duration(cfg.DefaultCooldownMs) * time.Millisecond,
 		MaxRetries:      cfg.MaxRetries,
+		ZaiTokenPool:    zaitokens.NewStore(database),
 	}
 	_ = qt
 
@@ -96,6 +98,7 @@ func main() {
 		ScraperJob: &wire.ScraperJob{},
 		WebAuth:    &wire.WebAuth{HTTP: httpClient},
 		Upstream:   upstream,
+		ZaiTokens:  zaitokens.NewStore(database),
 	}
 
 	srv := api.NewServer(deps)
