@@ -348,13 +348,13 @@ type createChatResp struct {
 
 // createChat opens a disposable chat and returns its id.
 func (c *Client) createChat(ctx context.Context, credential, cookies, model string) (string, error) {
+	ts := time.Now().Unix()
 	body := map[string]any{
-		"title":      "New Chat",
-		"models":     []string{model},
-		"chat_mode":  chatMode(credential),
-		"chat_type":  "t2t",
-		"timestamp":  time.Now().UnixMilli(),
-		"project_id": "",
+		"title":     fmt.Sprintf("api_%d", ts),
+		"models":    []string{model},
+		"chat_mode": chatMode(credential),
+		"chat_type": "t2t",
+		"timestamp": ts,
 	}
 	resp, err := c.do(ctx, credential, cookies, http.MethodPost, "/api/v2/chats/new", body)
 	if err != nil {
@@ -504,10 +504,11 @@ func (c *Client) ChatCompletion(credential, cookies, model string, messages []Me
 		"chat_mode":          chatMode(credential),
 		"model":              model,
 		"parent_id":          nil,
+		"timestamp":          time.Now().Unix(),
 		"messages": []any{map[string]any{
 			"fid":         newUUID(),
 			"parentId":    nil,
-			"childrenIds": []string{},
+			"childrenIds": []string{newUUID()},
 			"role":        "user",
 			"content":     prompt,
 			"user_action": "chat",
@@ -516,11 +517,22 @@ func (c *Client) ChatCompletion(credential, cookies, model string, messages []Me
 			"models":      []string{model},
 			"chat_type":   "t2t",
 			"feature_config": map[string]any{
-				"thinking_enabled": true,
-				"output_schema":    "phase",
-				"auto_thinking":    true,
-				"research_mode":    "normal",
-				"auto_search":      false,
+				"thinking_enabled":     true,
+				"output_schema":        "phase",
+				"auto_thinking":        true,
+				"thinking_mode":        "Auto",
+				"thinking_format":      "summary",
+				"research_mode":        "normal",
+				"auto_search":          false,
+				"code_interpreter":     false,
+				"plugins_enabled":      false,
+				"function_calling":     false,
+				"enable_tools":         false,
+				"enable_function_call": false,
+				"tool_choice":          "none",
+			},
+			"extra": map[string]any{
+				"meta": map[string]any{"subChatType": "t2t"},
 			},
 			"sub_chat_type": "t2t",
 			"parent_id":     nil,
