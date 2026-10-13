@@ -123,15 +123,25 @@ func login(email, password string, headed bool) result {
 		_ = page.Press(`input[type="password"]`, "Enter")
 	}
 
-	// Wait for the session token (up to 60s — may include captcha/2FA).
-	deadline := time.Now().Add(60 * time.Second)
+	// Wait for the session token. In headed mode give the user time to solve
+	// any captcha or type a verification code in the visible browser.
+	waitFor := 60 * time.Second
+	if headed {
+		waitFor = 5 * time.Minute
+	}
+	deadline := time.Now().Add(waitFor)
 	for time.Now().Before(deadline) {
 		if tok := localStorageToken(page); tok != "" {
 			return result{OK: true, Token: tok, Cookies: cookieString(page)}
 		}
 		// Detect a verification-code challenge.
 		if codeChallengeVisible(page) {
-			return result{NeedCode: true, Error: "verification code required — complete it in the browser, then retry"}
+			if !headed {
+				return result{NeedCode: true, Error: "verification code required — complete it in the browser, then retry"}
+			}
+			// Headed: the user can see and complete it — keep waiting.
+			time.Sleep(2 * time.Second)
+			continue
 		}
 		time.Sleep(time.Second)
 	}
@@ -178,9 +188,20 @@ func passwordVisible(page playwright.Page) bool {
 }
 
 func codeChallengeVisible(page playwright.Page) bool {
+	// A real code challenge has a code INPUT field, not just text mentioning
+	// "verification code" (the password-mode page has that text as a toggle link).
 	v, _ := page.Evaluate(`() => {
-		const t = document.body ? document.body.innerText : '';
-		return /verification code|enter code|verify.*email/i.test(t);
+		const sels = [
+			'input[placeholder*="code" i]',
+			'input[name*="code" i]',
+			'input[aria-label*="code" i]',
+			'input[inputmode="numeric"]',
+		];
+		for (const s of sels) {
+			const el = document.querySelector(s);
+			if (el && el.offsetParent !== null) return true;
+		}
+		return false;
 	}`)
 	b, _ := v.(bool)
 	return b
