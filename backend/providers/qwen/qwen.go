@@ -326,9 +326,15 @@ func FlattenMessages(messages []Message) string {
 }
 
 // riskControlError maps risk-control response text to a 429 QwenError.
+// The response preview is included so the real cause is visible.
 func riskControlError(text string) *QwenError {
 	if riskRe.MatchString(text) {
-		return NewQwenError("qwen risk control triggered — account parked in cooldown", 429)
+		preview := strings.TrimSpace(text)
+		preview = strings.Join(strings.Fields(preview), " ")
+		if len(preview) > 250 {
+			preview = preview[:250] + "…"
+		}
+		return NewQwenError(fmt.Sprintf("qwen risk control triggered — account parked in cooldown (qwen said: %s)", preview), 429)
 	}
 	return nil
 }
