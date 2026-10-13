@@ -338,9 +338,9 @@ func ValidateAccount(body map[string]any) (AccountConfig, error) {
 	if !ok {
 		return AccountConfig{}, errBad("apiKey must be a string")
 	}
-	priorityRaw, _ := body["priority"]
+	priorityRaw, hasPriority := body["priority"]
 	priority, ok := toFloat(priorityRaw)
-	if !ok {
+	if !ok && hasPriority {
 		return AccountConfig{}, errBad("priority must be a number")
 	}
 	name := str("name")
