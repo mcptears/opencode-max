@@ -111,6 +111,10 @@ func main() {
 		mux := http.NewServeMux()
 		mux.Handle("/dashboard", spa)
 		mux.Handle("/dashboard/", spa)
+		// Root redirects to the dashboard for convenience.
+		mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/dashboard/", http.StatusFound)
+		})
 		mux.Handle("/", handler)
 		handler = mux
 	}
