@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand/v2"
 	"net/http"
 	"regexp"
@@ -545,6 +546,7 @@ func (c *Client) ChatCompletion(credential, cookies, model string, messages []Me
 			return nil, NewQwenError("qwen token rejected — reconnect the account", 401)
 		}
 		if rc := riskControlError(string(text)); rc != nil {
+			log.Printf("qwen risk control raw response: %s", string(text))
 			return nil, rc
 		}
 		status := upstream.StatusCode
