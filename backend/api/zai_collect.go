@@ -59,8 +59,20 @@ func findZaiCollect() string {
 	return ""
 }
 
-func runZaiCollect(count int) {
-	defer zaiCollectRunning.Store(false)
+// TriggerZaiCollect starts a background device-token harvest unless one is
+// already running. Safe to call from non-api packages (e.g. wire).
+func TriggerZaiCollect(count int) {
+	if zaiCollectRunning.Load() {
+		return
+	}
+	if count <= 0 {
+		count = 20
+	}
+	zaiCollectRunning.Store(true)
+	go runZaiCollect(count)
+}
+
+func runZaiCollect(count int) {	defer zaiCollectRunning.Store(false)
 	bin := findZaiCollect()
 	if bin == "" {
 		zaiCollectAppend("zai-collect binary not found next to the server or on PATH\n")
