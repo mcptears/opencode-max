@@ -83,6 +83,7 @@ func main() {
 		DefaultCooldown: time.Duration(cfg.DefaultCooldownMs) * time.Millisecond,
 		MaxRetries:      cfg.MaxRetries,
 		ZaiTokenPool:    zaitokens.NewStore(database),
+		OnZaiPoolEmpty: func() { api.TriggerZaiCollect(20) },
 	}
 	_ = qt
 
