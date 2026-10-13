@@ -73,7 +73,11 @@ func (w *WebAuth) QwenBrowserSignIn(ctx context.Context, email, password string)
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, bin, "--email", email, "--password", password)
+	args := []string{"--email", email, "--password", password}
+	if os.Getenv("QWEN_HEADED") == "1" {
+		args = append(args, "--headed")
+	}
+	cmd := exec.CommandContext(cmdCtx, bin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
