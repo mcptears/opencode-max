@@ -3,11 +3,11 @@
  * separate qwen2api deployment needed.
  *
  * Protocol (chat.qwen.ai private web API):
- *   1. Auth: the account credential is either the `token` from
- *      chat.qwen.ai localStorage, or a Cookie header. It is sent with
- *      `source: web` — Bearer + `source: desktop` trips Qwen's
- *      FAIL_SYS_USER_VALIDATE risk control, so Cookie is preferred when the
- *      credential looks like one.
+ *   1. Auth: the account credential is the `token` from chat.qwen.ai
+ *      localStorage, sent as `Authorization: Bearer` — never with the
+ *      browser's cookies: stale anti-bot cookies (tfstk, ssxmod_itna) next
+ *      to a valid Bearer trip baxia risk control, while the same request
+ *      Bearer-only passes (the working qwen2API reference does the same).
  *   2. POST /api/v2/chats/new -> { success, data: { id } }
  *   3. POST /api/v2/chat/completions?chat_id=<id> (SSE) with a single
  *      flattened user message; phases: think / thinking_summary (reasoning),
@@ -17,7 +17,13 @@
  * Risk-control responses (FAIL_SYS_USER_VALIDATE, RGV587_ERROR, captcha)
  * arrive as HTTP 200 JSON instead of an event stream and are surfaced as
  * 429s so the pool parks the account in cooldown instead of burning it.
+ * Auth failures (expired/invalid token) also arrive as HTTP 200 JSON —
+ * `{success:false,data:{code:"unauthorized",...}}` — never as 401, so the
+ * response body must always be inspected; they surface as 401 so the pool
+ * parks the account as invalid instead of retrying into 502s.
  */
+
+import { Agent } from 'undici';
 
 export class QwenWebError extends Error {
   constructor(
@@ -149,7 +155,7 @@ async function headers(credential: string, cookies?: string): Promise<Record<str
   if (cred) {
     // Logged-in: Bearer token only, browser-like headers. No baxia.
     const h: Record<string, string> = {
-      'Authorization': `Bearer ${cred}`,
+      'Authorization': `Bearer ${cred.replace(/^token=/i, '')}`,
       'x-request-id': crypto.randomUUID(),
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       'Accept': 'application/json, text/plain, */*',
@@ -165,7 +171,8 @@ async function headers(credential: string, cookies?: string): Promise<Record<str
       'sec-fetch-site': 'same-origin',
       'content-type': 'application/json',
     };
-    if (cookies?.trim()) h['Cookie'] = cookies.trim();
+    // No Cookie here: stale browser anti-bot cookies next to a valid Bearer
+    // trip baxia risk control (the reference client sends Bearer only).
     return h;
   }
   // Guest: baxia headers only.
@@ -220,13 +227,205 @@ interface FetchOpts {
   dispatcher?: unknown;
 }
 
+// ============================================================================
+// WAF hygiene (mirrors the production reference clients for this exact WAF):
+//  - warm up with a GET to the site root first, collecting acw_tc-style cookies,
+//  - keep a random 200-500 ms shared gap between upstream calls (bursts are
+//    what trips the Aliyun WAF),
+//  - reuse chats instead of one chat per request (chats/new is the most
+//    aggressively challenged endpoint; one chat per message looks like a bot).
+// ============================================================================
+
+// Chrome-shaped TLS: Node's closest equivalent to the reference client's
+// uTLS HelloChrome profile (Aliyun fingerprints TLS; Go's/Node's defaults
+// are what get challenged).
+let chromeTlsAgent: Agent | null = null;
+
+function qwenDispatcher(override?: unknown): unknown {
+  if (override) return override;
+  if (!chromeTlsAgent) {
+    chromeTlsAgent = new Agent({
+      connect: {
+        ciphers:
+          'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA:AES256-SHA',
+        ecdhCurve: 'X25519:P-256:P-384',
+        sigalgs:
+          'ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256:rsa_pkcs1_sha256:ecdsa_secp384r1_sha384:rsa_pss_rsae_sha384:rsa_pkcs1_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha512',
+        ALPNProtocols: ['http/1.1'],
+        minVersion: 'TLSv1.2',
+        maxVersion: 'TLSv1.3',
+      },
+    });
+  }
+  return chromeTlsAgent;
+}
+
+// --- per-host anti-bot cookie jar -------------------------------------------
+const WARM_COOKIE_TTL_MS = 30 * 60 * 1000;
+const ANTIBOT_COOKIE = /^(acw_|cdn_sec_tc|tfstk|cna|isg|xlly_s|x-ap|sca|atpsida|ssxmod_itna2?)$/i;
+const cookieJar = new Map<string, Map<string, string>>();
+let jarWarmedAt = 0;
+
+function jarKey(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '');
+}
+
+function jarHeaders(baseUrl: string): Record<string, string> {
+  const jar = cookieJar.get(jarKey(baseUrl));
+  if (!jar || jar.size === 0) return {};
+  return { Cookie: [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ') };
+}
+
+function harvestCookies(baseUrl: string, res: Response): void {
+  const get = (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
+  const raw = typeof get === 'function' ? get.call(res.headers) : [];
+  if (raw.length === 0) return;
+  let jar = cookieJar.get(jarKey(baseUrl));
+  if (!jar) {
+    jar = new Map();
+    cookieJar.set(jarKey(baseUrl), jar);
+  }
+  for (const line of raw) {
+    const c = parseSetCookie(line);
+    if (c && ANTIBOT_COOKIE.test(c.name)) jar.set(c.name, c.value);
+  }
+}
+
+/** GET the site root once per TTL to collect acw_tc-style cookies into the jar. */
+async function warmUpCookies(baseUrl: string): Promise<void> {
+  if (Date.now() - jarWarmedAt < WARM_COOKIE_TTL_MS && cookieJar.has(jarKey(baseUrl))) return;
+  try {
+    const r = await fetch(`${jarKey(baseUrl)}/`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(15000),
+      dispatcher: qwenDispatcher(),
+    } as RequestInit & { dispatcher?: unknown });
+    harvestCookies(baseUrl, r);
+    void r.body?.cancel();
+    jarWarmedAt = Date.now();
+  } catch {
+    /* best-effort */
+  }
+}
+
+// --- WAF circuit breaker (ported from the working GLM/z.ai client) ----------
+// Once the WAF challenges POSTs, retrying immediately makes it worse: fail
+// fast with a retry hint and let one background prober decide when the block
+// lifts (the cooldown doubles while it persists: 60s -> 30min).
+let wafBaseCooldownMs = 60 * 1000;
+let wafMaxCooldownMs = 30 * 60 * 1000;
+let wafOpen = false;
+let wafOpenedAt = 0;
+let wafCooldownMs = 0;
+let wafBlockCount = 0;
+let wafProbeGen = 0;
+let wafBaseUrl = 'https://chat.qwen.ai';
+
+function wafRemainingMs(): number {
+  if (!wafOpen) return 0;
+  const remaining = wafOpenedAt + wafCooldownMs - Date.now();
+  return remaining > 0 ? remaining : 0;
+}
+
+/** Fail fast while the breaker is open; probing is owned by the prober. */
+function wafGate(): void {
+  if (!wafOpen) return;
+  throw new QwenWebError(`qwen WAF block active (Aliyun) — retry in ~${Math.max(1, Math.ceil(wafRemainingMs() / 1000))}s`, 503);
+}
+
+function wafRetryHint(): string {
+  return `retry in ~${Math.max(1, Math.ceil(wafRemainingMs() / 1000))}s`;
+}
+
+function recordWafBlock(baseUrl: string): void {
+  wafBaseUrl = jarKey(baseUrl);
+  wafBlockCount++;
+  if (wafOpen) return;
+  wafOpen = true;
+  wafOpenedAt = Date.now();
+  wafCooldownMs = wafBaseCooldownMs;
+  scheduleWafProbe(++wafProbeGen);
+}
+
+function recordWafSuccess(): void {
+  if (!wafOpen && wafBlockCount === 0) return;
+  wafOpen = false;
+  wafBlockCount = 0;
+  wafCooldownMs = 0;
+  wafProbeGen++;
+}
+
+function scheduleWafProbe(gen: number): void {
+  const timer = setTimeout(() => {
+    void (async () => {
+      if (gen !== wafProbeGen || !wafOpen) return;
+      let blocked = true;
+      try {
+        // Bare POST to the challenged endpoint: a challenge page means still
+        // blocked; anything else (even 400/403 JSON) proves the block lifted.
+        const r = await fetch(`${wafBaseUrl}/api/v2/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...jarHeaders(wafBaseUrl) },
+          body: '{}',
+          signal: AbortSignal.timeout(15000),
+          dispatcher: qwenDispatcher(),
+        } as RequestInit & { dispatcher?: unknown });
+        const text = await r.text().catch(() => '');
+        blocked = WAF_CHALLENGE.test(text) || (r.status === 405 && /threat|blocked/i.test(text));
+      } catch {
+        blocked = true;
+      }
+      if (gen !== wafProbeGen || !wafOpen) return;
+      if (blocked) {
+        wafCooldownMs = Math.min(wafCooldownMs * 2, wafMaxCooldownMs);
+        wafOpenedAt = Date.now();
+        scheduleWafProbe(gen);
+      } else {
+        recordWafSuccess();
+      }
+    })();
+  }, wafCooldownMs || wafBaseCooldownMs);
+  timer.unref?.();
+}
+
+/** Test-only: shrink breaker timing and reset state between tests. */
+export function __wafTestControls(baseMs: number, maxMs: number): void {
+  wafBaseCooldownMs = baseMs;
+  wafMaxCooldownMs = maxMs;
+  wafOpen = false;
+  wafBlockCount = 0;
+  wafCooldownMs = 0;
+  wafProbeGen++;
+}
+
+// Shared pacing gate: every upstream call claims the next start slot.
+let paceNextSlot = 0;
+let paceGapMs = 0;
+
+async function pace(): Promise<void> {
+  if (!paceGapMs) paceGapMs = 200 + Math.floor(Math.random() * 300);
+  const now = Date.now();
+  const slot = Math.max(now, paceNextSlot);
+  paceNextSlot = slot + paceGapMs;
+  const wait = slot - now;
+  if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+}
+
 async function qwenFetch(baseUrl: string, credential: string, path: string, init: RequestInit, opts: FetchOpts, cookies?: string): Promise<Response> {
-  return fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
+  await pace();
+  wafGate();
+  await warmUpCookies(baseUrl);
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
     ...init,
-    headers: { ...(await headers(credential, cookies)), ...init.headers },
+    headers: { ...(await headers(credential, cookies)), ...jarHeaders(baseUrl), ...init.headers },
     signal: opts.signal,
-    dispatcher: opts.dispatcher,
+    dispatcher: qwenDispatcher(opts.dispatcher),
   } as RequestInit & { dispatcher?: unknown });
+  harvestCookies(baseUrl, res);
+  return res;
 }
 
 /** SHA-256 hex digest (used for the sign-in password — the plaintext never leaves the browser). */
@@ -244,6 +443,8 @@ function parseSetCookie(header: string): { name: string; value: string } | null 
 
 function signinError(status: number, bodyText: string): string {
   if (status === 401 || status === 403) return 'email or password incorrect';
+  // Real Qwen returns 400 INVALID_CRED for wrong credentials.
+  if (status === 400 && /INVALID_CRED|incorrect/i.test(bodyText)) return 'email or password incorrect';
   if (status === 429) return 'too many sign-in attempts — wait a bit and retry';
   const t = bodyText.slice(0, 160);
   return `qwen sign-in failed (${status})${t ? `: ${t}` : ''}`;
@@ -252,8 +453,8 @@ function signinError(status: number, bodyText: string): string {
 /**
  * Sign in with a Qwen account — the same call the chat.qwen.ai web frontend
  * makes. `passwordHash` must be the SHA-256 hex of the password, so the
- * plaintext password never reaches this server. Only the session credential
- * (token cookie) is returned; nothing is persisted here.
+ * plaintext password never reaches this server. The raw session token is
+ * returned (callers send it as Bearer```); nothing is persisted here.
  */
 export async function qwenSignIn(
   baseUrl: string,
@@ -276,7 +477,8 @@ export async function qwenSignIn(
   for (const path of ['/api/v1/auths/signin', '/api/v2/auths/signin']) {
     let r: Response;
     try {
-      r = await fetch(`${base}${path}`, { ...init, signal: opts.signal, dispatcher: opts.dispatcher } as RequestInit & {
+      const timeout = AbortSignal.timeout(30000);
+      r = await fetch(`${base}${path}`, { ...init, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout, dispatcher: qwenDispatcher(opts.dispatcher) } as RequestInit & {
         dispatcher?: unknown;
       });
     } catch (e) {
@@ -296,12 +498,12 @@ export async function qwenSignIn(
     for (const h of rawCookies) {
       const c = parseSetCookie(h);
       if (c && c.name.toLowerCase() === 'token' && c.value) {
-        return { ok: true, credential: `token=${c.value}` };
+        return { ok: true, credential: c.value };
       }
     }
     const j = (await r.json().catch(() => null)) as { token?: unknown } | null;
     if (j && typeof j.token === 'string' && j.token) {
-      return { ok: true, credential: `token=${j.token}` };
+      return { ok: true, credential: j.token };
     }
     return { ok: false, error: 'sign-in succeeded but Qwen returned no session token' };
   }
@@ -317,8 +519,21 @@ export async function validateQwenCredential(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const r = await qwenFetch(baseUrl, credential, '/api/v2/chats/?page=1&exclude_project=true', { method: 'GET' }, opts, cookies);
+    const text = await r.text().catch(() => '');
     if (r.status === 401 || r.status === 403) return { ok: false, error: 'token rejected (401/403) — sign in again and paste a fresh token' };
     if (!r.ok) return { ok: false, error: `qwen web api returned ${r.status}` };
+    // Auth failures arrive as HTTP 200 + {success:false,data:{code:"unauthorized"}}.
+    const j = parseUpstreamJson(text);
+    if (j?.success === false) {
+      if (tokenRejectedIn(j)) return { ok: false, error: `token expired or rejected — reconnect the account (upstream: ${upstreamErrorText(j)})` };
+      return { ok: false, error: `qwen web api error: ${upstreamErrorText(j)}` };
+    }
+    if (WAF_CHALLENGE.test(text)) {
+      recordWafBlock(baseUrl);
+      return { ok: false, error: 'qwen WAF browser-verification challenge — retry shortly' };
+    }
+    if (TOKEN_REJECTED.test(text)) return { ok: false, error: 'token rejected — reconnect the account' };
+    recordWafSuccess();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'network error' };
@@ -326,35 +541,98 @@ export async function validateQwenCredential(
 }
 
 async function createChat(baseUrl: string, credential: string, model: string, opts: FetchOpts, cookies?: string): Promise<string> {
-  const r = await qwenFetch(
-    baseUrl,
-    credential,
-    '/api/v2/chats/new',
-    {
-      method: 'POST',
-      body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: chatMode(credential), chat_type: 't2t', timestamp: Date.now(), project_id: '' }),
-    },
-    opts,
-    cookies,
-  );
-  if (r.status === 401 || r.status === 403) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
-  if (!r.ok) {
-    const bodyPreview = await r.text().then(t => t.slice(0, 300)).catch(() => '(unreadable)');
-    throw new QwenWebError(`qwen create-chat failed (${r.status}): ${bodyPreview}`, r.status >= 500 ? 502 : r.status);
+  const init: RequestInit = {
+    method: 'POST',
+    body: JSON.stringify({ title: 'New Chat', models: [model], chat_mode: chatMode(credential), chat_type: 't2t', timestamp: Date.now(), project_id: '' }),
+  };
+  // The WAF intermittently answers POSTs with a browser-verification page
+  // (HTTP 200, HTML) instead of JSON. It clears on later attempts, so retry
+  // briefly before surfacing it as a retriable 503.
+  for (let attemptNo = 1; ; attemptNo++) {
+    const r = await qwenFetch(baseUrl, credential, '/api/v2/chats/new', init, opts, cookies);
+    if (r.status === 401 || r.status === 403) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
+    const bodyText = await r.text().catch(() => '');
+    if (!r.ok) {
+      throw new QwenWebError(`qwen create-chat failed (${r.status}): ${bodyText.slice(0, 300)}`, r.status >= 500 ? 502 : r.status);
+    }
+    if (WAF_CHALLENGE.test(bodyText)) {
+      if (attemptNo < 3 && !opts.signal?.aborted) {
+        await new Promise((res) => setTimeout(res, 1500 * attemptNo));
+        continue;
+      }
+      recordWafBlock(baseUrl);
+      throw new QwenWebError(`qwen WAF browser-verification challenge — ${wafRetryHint()}`, 503);
+    }
+    const j = parseUpstreamJson(bodyText);
+  if (j?.success === false) {
+    // Expired/invalid token (or anything auth-shaped) must surface as 401 so
+    // the pool parks the account — not as a retriable 502.
+    if (tokenRejectedIn(j)) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
+    throw riskControlError(bodyText) ?? new QwenWebError(`qwen create-chat failed: ${upstreamErrorText(j)}`, 502);
   }
-  const j = (await r.json().catch(() => null)) as { data?: { id?: string } } | null;
-  const id = j?.data?.id;
-  if (!id) throw new QwenWebError('qwen create-chat returned no chat id', 502);
-  return id;
+    const id = typeof j?.data === 'object' ? j.data?.id : undefined;
+    if (!id) throw new QwenWebError(`qwen create-chat returned no chat id: ${bodyText.slice(0, 300)}`, 502);
+    recordWafSuccess();
+    return id;
+  }
 }
 
-/** Best-effort cleanup of the disposable chat; never throws. */
+/** Best-effort cleanup when retiring a warm chat; never throws. */
 async function deleteChat(baseUrl: string, credential: string, chatId: string, opts: FetchOpts, cookies?: string): Promise<void> {
   try {
     await qwenFetch(baseUrl, credential, `/api/v2/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' }, opts, cookies);
   } catch {
-    /* ignore — chats are disposable */
+    /* ignore */
   }
+}
+
+// ----------------------------------------------------------------------------
+// Warm chat pool: reuse one chat for several turns, then retire it.
+// ----------------------------------------------------------------------------
+
+const WARM_CHAT_REUSE = 10;
+const WARM_CHAT_TTL_MS = 20 * 60 * 1000;
+
+interface WarmChat {
+  id: string;
+  uses: number;
+  created: number;
+}
+
+const warmChats = new Map<string, WarmChat>();
+const warmChatInflight = new Map<string, Promise<string>>();
+
+function warmChatKey(credential: string, model: string): string {
+  return `${credential.slice(0, 40)}|${model}`;
+}
+
+/** Take a warm chat or create one; concurrent callers share the creation. */
+async function takeChat(baseUrl: string, credential: string, model: string, opts: FetchOpts, cookies?: string): Promise<string> {
+  const key = warmChatKey(credential, model);
+  const cached = warmChats.get(key);
+  if (cached && cached.uses < WARM_CHAT_REUSE && Date.now() - cached.created < WARM_CHAT_TTL_MS) {
+    cached.uses++;
+    return cached.id;
+  }
+  if (cached) {
+    warmChats.delete(key);
+    void deleteChat(baseUrl, credential, cached.id, opts, cookies);
+  }
+  const inflight = warmChatInflight.get(key);
+  if (inflight) return inflight;
+  const run = createChat(baseUrl, credential, model, opts, cookies)
+    .then((id) => {
+      warmChats.set(key, { id, uses: 1, created: Date.now() });
+      return id;
+    })
+    .finally(() => warmChatInflight.delete(key));
+  warmChatInflight.set(key, run);
+  return run;
+}
+
+/** Drop a warm chat (upstream rejected it — e.g. expired or 404). */
+function dropWarmChat(credential: string, model: string): void {
+  warmChats.delete(warmChatKey(credential, model));
 }
 
 interface QwenDelta {
@@ -380,11 +658,53 @@ export function parseQwenDelta(payload: string): QwenDelta | null {
 
 const RISK_PATTERNS = /FAIL_SYS_USER_VALIDATE|RGV587_ERROR|captcha|verification/i;
 
+/** Aliyun WAF browser-verification page (arrives as HTTP 200 HTML, not JSON). */
+const WAF_CHALLENGE = /<!doctype html|<html[^>]*>|aliyun_waf/i;
+
 function riskControlError(text: string): QwenWebError | null {
   if (RISK_PATTERNS.test(text)) {
-    return new QwenWebError('qwen risk control triggered — account parked in cooldown', 429);
+    const j = parseUpstreamJson(text);
+    const detail = j ? ` (upstream: ${upstreamErrorText(j)})` : ` (upstream: ${text.slice(0, 120).replace(/\s+/g, ' ')})`;
+    return new QwenWebError(`qwen risk control triggered — account parked in cooldown${detail}`, 429);
   }
   return null;
+}
+
+/** Shape of Qwen's JSON error bodies: `{success:false,data:{code,details}}`. */
+interface QwenUpstreamErrorBody {
+  success?: boolean;
+  data?: { id?: string; code?: string; details?: string } | string;
+  code?: string;
+  details?: string;
+  message?: string;
+}
+
+/** Upstream phrases that mean the credential is dead (body says so on HTTP 200). */
+const TOKEN_REJECTED = /unauthorized|token has expired|no longer valid|please log in|invalid token|not logged in/i;
+
+function parseUpstreamJson(text: string): QwenUpstreamErrorBody | null {
+  try {
+    return JSON.parse(text) as QwenUpstreamErrorBody;
+  } catch {
+    return null;
+  }
+}
+
+/** True when an HTTP-200 body actually says the credential is dead. */
+function tokenRejectedIn(j: QwenUpstreamErrorBody | null): boolean {
+  if (!j || j.success !== false) return false;
+  const data = typeof j.data === 'object' ? j.data : undefined;
+  const code = data?.code ?? j.code ?? '';
+  const details = data?.details ?? j.details ?? j.message ?? '';
+  return TOKEN_REJECTED.test(`${code} ${details}`);
+}
+
+/** Human-readable code/details from a success:false body. */
+function upstreamErrorText(j: QwenUpstreamErrorBody): string {
+  const data = typeof j.data === 'object' ? j.data : undefined;
+  const code = data?.code ?? j.code ?? 'upstream_error';
+  const details = data?.details ?? j.details ?? j.message ?? '';
+  return details ? `${code}: ${details}` : code;
 }
 
 const sseEncoder = new TextEncoder();
@@ -404,7 +724,7 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
   const prompt = flattenMessages(req.messages);
   if (!prompt) throw new QwenWebError('empty prompt', 400);
   const opts: FetchOpts = { signal: req.signal, dispatcher: req.dispatcher };
-  const chatId = await createChat(req.baseUrl, req.credential, req.model, opts, req.cookies);
+  const chatId = await takeChat(req.baseUrl, req.credential, req.model, opts, req.cookies);
 
   const fid = crypto.randomUUID();
   let upstream: Response;
@@ -452,33 +772,36 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
       req.cookies,
     );
   } catch (e) {
-    void deleteChat(req.baseUrl, req.credential, chatId, opts, req.cookies);
-    throw e;
+    throw e; // network-level: the warm chat stays reusable
   }
 
   const contentType = upstream.headers.get('content-type') ?? '';
-  // Risk control arrives as HTTP 200 JSON, not an event stream.
+  // Risk control AND auth failures arrive as HTTP 200 JSON, not an event stream.
   if (!contentType.includes('text/event-stream')) {
     const text = await upstream.text().catch(() => '');
-    void deleteChat(req.baseUrl, req.credential, chatId, opts);
+    if (upstream.status === 404 || upstream.status === 401 || upstream.status === 403) dropWarmChat(req.credential, req.model);
     if (upstream.status === 401 || upstream.status === 403) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
+    if (WAF_CHALLENGE.test(text)) {
+      recordWafBlock(req.baseUrl);
+      throw new QwenWebError(`qwen WAF browser-verification challenge — ${wafRetryHint()}`, 503);
+    }
+    const j = parseUpstreamJson(text);
+    if (tokenRejectedIn(j)) throw new QwenWebError('qwen token rejected — reconnect the account', 401);
     throw riskControlError(text) ?? new QwenWebError(`qwen completions failed (${upstream.status}): ${text.slice(0, 300)}`, upstream.status >= 500 ? 502 : upstream.status);
   }
 
+  recordWafSuccess();
   const completionId = `chatcmpl-qwen-${chatId.slice(0, 8)}`;
   const outModel = req.responseModel ?? req.model;
   const upstreamBody = upstream.body;
   if (!upstreamBody) {
-    void deleteChat(req.baseUrl, req.credential, chatId, opts);
+    dropWarmChat(req.credential, req.model);
     throw new QwenWebError('qwen returned an empty stream', 502);
   }
 
   let finished = false;
   const finishUp = (): void => {
-    if (!finished) {
-      finished = true;
-      void deleteChat(req.baseUrl, req.credential, chatId, opts);
-    }
+    finished = true;
   };
 
   // Non-streaming: collect the whole turn, then emit one JSON completion.
@@ -511,7 +834,10 @@ export async function qwenChatCompletion(req: QwenWebRequest): Promise<ReadableS
         reader.releaseLock();
         finishUp();
       }
-      if (!content && !reasoning) throw new QwenWebError('qwen returned an empty completion', 502);
+      if (!content && !reasoning) {
+        dropWarmChat(req.credential, req.model);
+        throw new QwenWebError('qwen returned an empty completion', 502);
+      }
       const completion = {
         id: completionId,
         object: 'chat.completion',

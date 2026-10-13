@@ -146,7 +146,7 @@ describe('Z.ai admin endpoints', () => {
   let server: Server | null = null;
   const auth = { Authorization: 'Bearer ' + 'test' + '-token' };
   const accountsFile = process.env.ACCOUNTS_FILE!;
-  const providersFile = path.join(projectRoot(), 'providers.json');
+  const providersFile = process.env.PROVIDERS_FILE ?? path.join(projectRoot(), 'providers.json');
 
   beforeAll(async () => {
     saveSettings({ adminToken: 'test-token' });

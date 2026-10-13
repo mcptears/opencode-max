@@ -58,7 +58,8 @@ import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
 import { zaiChatCompletion, ZaiWebError } from './zaiWeb.js';
 import type { Alerter } from './alerts.js';
-import { qwenChatCompletion, resolveQwenModel, QwenWebError } from './qwenWeb.js';
+import { qwenChatCompletion, resolveQwenModel, qwenSignIn, QwenWebError } from './qwenWeb.js';
+import { readAccounts, writeAccounts } from './store.js';
 import { deepseekChatCompletion, resolveDeepSeekModel, resolveDeepSeekModelName, DeepSeekWebError } from './deepseekWeb.js';
 
 /** Rewrite the model name inside a JSON request body (for model fallbacks). */
@@ -420,8 +421,8 @@ export class UpstreamClient {
     const qwenOpts = provider.qwen ?? { defaultModel: 'qwen3.7-plus' };
     const qwenModel = resolveQwenModel(qwenOpts.modelMap, qwenOpts.defaultModel, parsed.model ?? model);
     const base = this.resolveBaseUrl(account);
-    try {
-      const stream = await qwenChatCompletion({
+    const attempt = (): Promise<ReadableStream<Uint8Array>> =>
+      qwenChatCompletion({
         baseUrl: base,
         credential: account.apiKey,
         cookies: account.cookies,
@@ -432,6 +433,17 @@ export class UpstreamClient {
         signal,
         dispatcher: this.rotator.dispatcherFor(proxy, this.rotator.currentFamily()),
       });
+    try {
+      let stream: ReadableStream<Uint8Array>;
+      try {
+        stream = await attempt();
+      } catch (e) {
+        // Qwen access tokens expire every ~15 min. With stored sign-in
+        // credentials, refresh once and retry before surfacing the 401.
+        if (!(e instanceof QwenWebError) || e.status !== 401) throw e;
+        if (!(await this.refreshQwenCredential(provider, account))) throw e;
+        stream = await attempt();
+      }
       // Report the *requested* model name so clients see what they asked for.
       return new Response(stream, {
         status: 200,
@@ -441,6 +453,41 @@ export class UpstreamClient {
       if (e instanceof QwenWebError) return qwenError(e.status, e.message);
       throw e; // network-level: retry with backoff like any other provider
     }
+  }
+
+  /** One re-login at a time per account (concurrent 401s share the refresh). */
+  private readonly qwenReloginInflight = new Map<string, Promise<boolean>>();
+
+  private refreshQwenCredential(provider: ProviderConfig, account: AccountConfig): Promise<boolean> {
+    const inflight = this.qwenReloginInflight.get(account.id);
+    if (inflight) return inflight;
+    const run = this.doRefreshQwenCredential(provider, account).finally(() => this.qwenReloginInflight.delete(account.id));
+    this.qwenReloginInflight.set(account.id, run);
+    return run;
+  }
+
+  private async doRefreshQwenCredential(provider: ProviderConfig, account: AccountConfig): Promise<boolean> {
+    if (!account.email || !account.passwordHash) return false;
+    this.metrics?.record('settings', `qwen token rejected on '${account.id}' — re-signing-in`);
+    const login = await qwenSignIn(provider.baseUrl || 'https://chat.qwen.ai', account.email, account.passwordHash);
+    if (!login.ok) {
+      this.metrics?.record('error', `qwen re-sign-in failed on '${account.id}': ${login.error}`);
+      return false;
+    }
+    account.apiKey = login.credential;
+    this.pool.clearInvalid(account.id);
+    try {
+      const accounts = readAccounts();
+      const i = accounts.findIndex((a) => a.id === account.id);
+      if (i >= 0) {
+        accounts[i] = { ...accounts[i], apiKey: login.credential };
+        writeAccounts(accounts);
+      }
+    } catch {
+      /* best-effort persistence */
+    }
+    this.metrics?.record('settings', `qwen account '${account.id}' re-signed-in — token refreshed`);
+    return true;
   }
 
   private async fetchDeepSeekWeb(

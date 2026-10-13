@@ -130,8 +130,8 @@ describe('DeepSeek admin endpoints', () => {
   let server: Server | null = null;
   const auth = { Authorization: 'Bearer ' + 'test' + '-token' };
   const accountsFile = process.env.ACCOUNTS_FILE!;
-  // providers.json has no env override — clean up anything the test writes.
-  const providersFile = path.join(projectRoot(), 'providers.json');
+  // providers.json is isolated per test run via PROVIDERS_FILE (see setup.ts).
+  const providersFile = process.env.PROVIDERS_FILE ?? path.join(projectRoot(), 'providers.json');
 
   beforeAll(async () => {
     saveSettings({ adminToken: 'test-token' });

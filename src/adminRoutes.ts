@@ -225,7 +225,9 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     while (accounts.some((a) => a.id === `qwen-${n}`)) n++;
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : email.split('@')[0];
     const priority = typeof body.priority === 'number' && Number.isFinite(body.priority) ? body.priority : n;
-    const account: AccountConfig = { id: `qwen-${n}`, name, provider: qwenProvider.id, apiKey: login.credential, priority };
+    // Store the sign-in credentials (hash only, never plaintext) so expired
+    // ~15-minute tokens refresh automatically on the next request.
+    const account: AccountConfig = { id: `qwen-${n}`, name, provider: qwenProvider.id, apiKey: login.credential, priority, email, passwordHash };
     accounts.push(account);
     writeAccounts(accounts);
     pool.replace(accounts);
@@ -441,6 +443,13 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       res.status(400).json({ error: { message: v.error, status: 400 } });
       return;
     }
+    // Preserve the Qwen auto-relogin credentials across edits (they are never
+    // sent to the UI) unless the request explicitly supplies new ones.
+    const prev = accounts[i];
+    v.account.email =
+      typeof body.email === 'string' && body.email.trim() ? body.email.trim() : prev.email;
+    v.account.passwordHash =
+      typeof body.passwordHash === 'string' && body.passwordHash.trim() ? body.passwordHash.trim() : prev.passwordHash;
     accounts[i] = v.account;
     writeAccounts(accounts);
     pool.replace(accounts);

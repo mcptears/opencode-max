@@ -19,7 +19,7 @@ import { saveSettings } from '../settings.js';
 /** Mock chat.qwen.ai signin endpoints. */
 let mock: http.Server | null = null;
 let mockBase = '';
-let signinMode: 'cookie' | 'json-token' | 'v1-404' | 'bad-creds' = 'cookie';
+let signinMode: 'cookie' | 'json-token' | 'v1-404' | 'bad-creds' | 'invalid-cred-400' = 'cookie';
 let lastSigninBody: unknown = null;
 
 beforeAll(async () => {
@@ -32,6 +32,10 @@ beforeAll(async () => {
         lastSigninBody = JSON.parse(body);
         if (signinMode === 'bad-creds') {
           res.writeHead(401, { 'content-type': 'application/json' }).end('{"detail":"invalid credentials"}');
+          return;
+        }
+        if (signinMode === 'invalid-cred-400') {
+          res.writeHead(400, { 'content-type': 'application/json' }).end('{"detail":{"code":"INVALID_CRED","details":"The email or password provided is incorrect. Please check for typos and try logging in again."}}');
           return;
         }
         if (signinMode === 'v1-404') {
@@ -73,7 +77,7 @@ describe('qwenSignIn', () => {
   it('signs in and prefers the token cookie', async () => {
     signinMode = 'cookie';
     const r = await qwenSignIn(mockBase, 'a@b.c', '0'.repeat(64));
-    expect(r).toEqual({ ok: true, credential: 'token=cookie-token-123' });
+    expect(r).toEqual({ ok: true, credential: 'cookie-token-123' });
     // Password must arrive pre-hashed, never plaintext.
     const sent = lastSigninBody as { email: string; password: string };
     expect(sent.email).toBe('a@b.c');
@@ -83,14 +87,21 @@ describe('qwenSignIn', () => {
   it('falls back to the JSON token when no cookie is set', async () => {
     signinMode = 'json-token';
     const r = await qwenSignIn(mockBase, 'a@b.c', '0'.repeat(64));
-    expect(r).toEqual({ ok: true, credential: 'token=jwt-from-json' });
+    expect(r).toEqual({ ok: true, credential: 'jwt-from-json' });
     signinMode = 'cookie';
   });
 
   it('falls back to the v2 endpoint when v1 404s', async () => {
     signinMode = 'v1-404';
     const r = await qwenSignIn(mockBase, 'a@b.c', '0'.repeat(64));
-    expect(r).toEqual({ ok: true, credential: 'token=jwt-v2' });
+    expect(r).toEqual({ ok: true, credential: 'jwt-v2' });
+    signinMode = 'cookie';
+  });
+
+  it('reports real-world 400 INVALID_CRED as bad credentials', async () => {
+    signinMode = 'invalid-cred-400';
+    const r = await qwenSignIn(mockBase, 'a@b.c', '0'.repeat(64));
+    expect(r).toEqual({ ok: false, error: 'email or password incorrect' });
     signinMode = 'cookie';
   });
 
@@ -107,8 +118,8 @@ describe('POST /api/accounts/qwen-login', () => {
   let server: Server | null = null;
   const auth = { Authorization: 'Bearer ' + 'test' + '-token' };
   const accountsFile = process.env.ACCOUNTS_FILE!;
-  // providers.json has no env override — clean up anything the test writes.
-  const providersFile = path.join(projectRoot(), 'providers.json');
+  // providers.json is isolated per test run via PROVIDERS_FILE (see setup.ts).
+  const providersFile = process.env.PROVIDERS_FILE ?? path.join(projectRoot(), 'providers.json');
 
   beforeAll(async () => {
     saveSettings({ adminToken: 'test-token' });
@@ -167,12 +178,13 @@ describe('POST /api/accounts/qwen-login', () => {
     expect(j.ok).toBe(true);
     // Server forwarded the hash, not the plaintext.
     expect((lastSigninBody as { password: string }).password).toBe(expectedHash);
-    // Account persisted with the session credential — and no password anywhere.
+    // Account persisted with the session credential + auto-relogin credentials
+    // (SHA-256 hash only — the plaintext never lands on disk).
     const stored = JSON.parse(fs.readFileSync(accountsFile, 'utf8')) as { accounts: Record<string, unknown>[] };
     const acc = stored.accounts.find((a) => a.id === j.id)!;
-    expect(acc.apiKey).toBe('token=cookie-token-123');
+    expect(acc.apiKey).toBe('cookie-token-123');
+    expect((acc as Record<string, unknown>).passwordHash).toBe(expectedHash);
     expect(JSON.stringify(stored)).not.toContain(password);
-    expect(JSON.stringify(stored)).not.toContain(expectedHash);
   });
 
   it('surfaces sign-in failures without creating an account', async () => {

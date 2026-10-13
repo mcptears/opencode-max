@@ -12,3 +12,5 @@ process.env.SETTINGS_FILE = path.join(dir, 'settings.json');
 // Isolate account/proxy file writes too (CONFIG reads these at import).
 process.env.ACCOUNTS_FILE = path.join(dir, 'accounts.json');
 process.env.PROXIES_FILE = path.join(dir, 'proxies.json');
+// Isolate providers.json too — tests write/remove it and it holds the live config.
+process.env.PROVIDERS_FILE = path.join(dir, 'providers.json');

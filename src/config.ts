@@ -19,6 +19,11 @@ export interface AccountConfig {
   baseUrl?: string;
   /** Optional per-account rolling 5h request budget (defaults to QUOTA_5H_LIMIT). */
   quotaLimit?: number;
+  /** Qwen auto-relogin: account email + SHA-256 hex of the password (the hash
+   *  is what Qwen's sign-in API accepts, so expired ~15-min access tokens can
+   *  be refreshed transparently; plaintext is never stored). */
+  email?: string;
+  passwordHash?: string;
 }
 
 export interface RuntimeConfig {

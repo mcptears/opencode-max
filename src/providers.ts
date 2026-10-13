@@ -56,7 +56,8 @@ export interface ProviderConfig {
   zai?: ZaiWebOptions;
 }
 
-export const PROVIDERS_FILE = path.join(projectRoot(), 'providers.json');
+// Tests isolate providers.json via setup.ts; the app uses the real file.
+export const PROVIDERS_FILE = process.env.PROVIDERS_FILE ?? path.join(projectRoot(), 'providers.json');
 
 /** One-click preset: native DeepSeek web provider (built into opencode-max). */
 export const DEEPSEEK_PRESET: ProviderConfig = {

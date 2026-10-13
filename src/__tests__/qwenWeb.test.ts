@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
@@ -9,6 +9,7 @@ import {
   qwenChatCompletion,
   validateQwenCredential,
   QwenWebError,
+  __wafTestControls,
 } from '../qwenWeb.js';
 
 /** Minimal mock of chat.qwen.ai's v2 web API. */
@@ -16,7 +17,15 @@ let server: http.Server | null = null;
 let base = '';
 let lastCreateBody: unknown = null;
 let lastCompletionBody: unknown = null;
-let mode: 'ok' | 'risk' | 'unauth' | 'empty' = 'ok';
+let mode: 'ok' | 'risk' | 'unauth' | 'empty' | 'expired' | 'expired-completions' | 'waf' | 'waf-hard' = 'ok';
+let createCalls = 0;
+
+beforeEach(() => {
+  // Shrink the WAF breaker timing and reset its module state between tests.
+  __wafTestControls(150, 400);
+  mode = 'ok';
+  createCalls = 0;
+});
 
 const sseBody = [
   'data: {"choices":[{"delta":{"phase":"think","content":"let me think"}}]}',
@@ -38,11 +47,28 @@ beforeAll(async () => {
           res.writeHead(401).end('{}');
           return;
         }
+        if (mode === 'expired') {
+          res.writeHead(200, { 'content-type': 'application/json' }).end('{"success":false,"request_id":"r","data":{"code":"unauthorized","details":"Token has expired, please log in again."}}');
+          return;
+        }
         res.writeHead(200, { 'content-type': 'application/json' }).end('{"success":true,"data":[]}');
         return;
       }
       if (url === '/api/v2/chats/new' && req.method === 'POST') {
         lastCreateBody = JSON.parse(body);
+        createCalls++;
+        if (mode === 'waf' && createCalls <= 2) {
+          res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><html><meta name="aliyun_waf_aa" content="x"></html>');
+          return;
+        }
+        if (mode === 'waf-hard') {
+          res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><html><meta name="aliyun_waf_aa" content="x"></html>');
+          return;
+        }
+        if (mode === 'expired') {
+          res.writeHead(200, { 'content-type': 'application/json' }).end('{"success":false,"request_id":"r","data":{"code":"unauthorized","details":"Token has expired, please log in again."}}');
+          return;
+        }
         res.writeHead(200, { 'content-type': 'application/json' }).end('{"success":true,"data":{"id":"chat-123"}}');
         return;
       }
@@ -59,6 +85,10 @@ beforeAll(async () => {
         }
         if (mode === 'unauth') {
           res.writeHead(401).end('{}');
+          return;
+        }
+        if (mode === 'expired-completions') {
+          res.writeHead(200, { 'content-type': 'application/json' }).end('{"success":false,"request_id":"r","data":{"code":"unauthorized","details":"Token has expired, please log in again."}}');
           return;
         }
         if (mode === 'empty') {
@@ -200,6 +230,118 @@ describe('qwenWeb protocol', () => {
       expect((e as QwenWebError).status).toBe(401);
     }
     mode = 'ok';
+  });
+
+  it('treats HTTP 200 + success:false unauthorized as a dead credential (validate)', async () => {
+    mode = 'expired';
+    const r = await validateQwenCredential(base, 'stale');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('reconnect');
+    mode = 'ok';
+  });
+
+  it('maps 200 + success:false create-chat to 401, not a retriable 502', async () => {
+    mode = 'expired';
+    try {
+      await qwenChatCompletion({ baseUrl: base, credential: 'stale', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: true });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(QwenWebError);
+      expect((e as QwenWebError).status).toBe(401);
+    }
+    mode = 'ok';
+  });
+
+  it('maps 200 + success:false completions JSON to 401', async () => {
+    mode = 'expired-completions';
+    try {
+      await qwenChatCompletion({ baseUrl: base, credential: 'stale', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: true });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as QwenWebError).status).toBe(401);
+    }
+    mode = 'ok';
+  });
+
+  it('reuses a warm chat across turns (chats/new is the challenged endpoint)', async () => {
+    mode = 'ok';
+    createCalls = 0;
+    for (let i = 0; i < 3; i++) {
+      const stream = await qwenChatCompletion({ baseUrl: base, credential: 'warm-a', model: 'qwen3.7-plus', messages: [{ role: 'user', content: 'hi' }], stream: false });
+      const j = JSON.parse(await readAll(stream));
+      expect(j.object).toBe('chat.completion');
+    }
+    expect(createCalls).toBe(1);
+    // a different credential gets its own warm chat
+    await qwenChatCompletion({ baseUrl: base, credential: 'warm-b', model: 'qwen3.7-plus', messages: [{ role: 'user', content: 'hi' }], stream: false });
+    expect(createCalls).toBe(2);
+  });
+
+  it('retries through WAF challenge pages and succeeds', async () => {
+    mode = 'waf';
+    createCalls = 0;
+    const stream = await qwenChatCompletion({ baseUrl: base, credential: 'waf', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: false });
+    const j = JSON.parse(await readAll(stream));
+    expect(j.object).toBe('chat.completion');
+    expect(createCalls).toBe(3);
+    mode = 'ok';
+  });
+
+  it('surfaces a 503 when the WAF challenge persists', async () => {
+    mode = 'waf-hard';
+    try {
+      await qwenChatCompletion({ baseUrl: base, credential: 'waf2', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: true });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(QwenWebError);
+      expect((e as QwenWebError).status).toBe(503);
+    }
+    mode = 'ok';
+  });
+
+  it('fails fast with a retry hint once the WAF breaker is open', async () => {
+    __wafTestControls(5000, 8000); // keep the prober out of the assertion window
+    mode = 'waf-hard';
+    try {
+      await qwenChatCompletion({ baseUrl: base, credential: 'waf-fast', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: true });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as QwenWebError).status).toBe(503);
+    }
+    const hitsAfterOpen = createCalls;
+    try {
+      await qwenChatCompletion({ baseUrl: base, credential: 'waf-fast', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: true });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as QwenWebError).status).toBe(503);
+      expect((e as QwenWebError).message).toContain('retry in');
+    }
+    // The fail-fast path must not touch the upstream at all.
+    expect(createCalls).toBe(hitsAfterOpen);
+    mode = 'ok';
+  });
+
+  it('closes the breaker after the background probe sees the block lift', async () => {
+    mode = 'waf-hard';
+    try {
+      await qwenChatCompletion({ baseUrl: base, credential: 'waf-rec', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: true });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as QwenWebError).status).toBe(503);
+    }
+    mode = 'ok';
+    let recovered = false;
+    for (let i = 0; i < 10 && !recovered; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      try {
+        const stream = await qwenChatCompletion({ baseUrl: base, credential: 'waf-rec', model: 'm', messages: [{ role: 'user', content: 'x' }], stream: false });
+        const j = JSON.parse(await readAll(stream));
+        recovered = j.object === 'chat.completion';
+      } catch {
+        /* still gated or probing — retry */
+      }
+    }
+    expect(recovered).toBe(true);
   });
 
   it('rejects empty completions', async () => {
