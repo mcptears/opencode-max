@@ -10,13 +10,33 @@ const CONNECTABLE = [
   { id: 'opencode-zen', name: 'OpenCode Zen' },
 ];
 
+interface TokenStatus {
+  count: number;
+  collecting: boolean;
+  collectLog: string;
+}
+
 export default function Accounts() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showPicker, setShowPicker] = useState(false);
   const [connectProvider, setConnectProvider] = useState<{ id: string; name: string } | null>(null);
+  const [tokens, setTokens] = useState<TokenStatus>({ count: 0, collecting: false, collectLog: '' });
 
   const load = () => api.get<Account[]>('/api/accounts').then(setAccounts).catch(() => {});
-  useEffect(() => { load(); }, []);
+  const loadTokens = () => api.get<TokenStatus>('/api/zai/tokens').then(setTokens).catch(() => {});
+  useEffect(() => {
+    load();
+    loadTokens();
+    const t = setInterval(loadTokens, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const collect = async () => {
+    await api.post('/api/zai/tokens/collect?count=20');
+    loadTokens();
+  };
+
+  const hasZai = accounts.some((a) => a.provider === 'zai');
 
   const reset = async (id: string) => {
     await api.post(`/api/accounts/${id}/reset`);
@@ -34,6 +54,26 @@ export default function Accounts() {
       <h1 className="page-title">Accounts</h1>
       <p className="page-sub">Connected provider accounts</p>
       <button className="btn btn-primary" onClick={() => setShowPicker(true)}>+ Connect account</button>
+
+      {hasZai && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Z.ai device tokens</h3>
+          <p style={{ marginTop: 8, color: 'var(--muted)', fontSize: 13 }}>
+            Z.ai needs a captcha token per chat request. Hadi harvests them automatically —
+            each token is single-use.
+          </p>
+          <p style={{ marginTop: 8 }}>
+            <span className="badge badge-active">{tokens.count} in pool</span>{' '}
+            {tokens.collecting && <span className="badge badge-cooling">collecting…</span>}
+          </p>
+          <div style={{ marginTop: 12 }}>
+            <button className="btn" onClick={collect} disabled={tokens.collecting}>
+              {tokens.collecting ? 'Collecting…' : 'Collect 20 tokens'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ marginTop: 16 }}>
         <div className="table-wrap">
           <table>
