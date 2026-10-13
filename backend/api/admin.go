@@ -668,12 +668,22 @@ func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	body := decodeBody(r)
+	accounts := s.deps.Accounts.Read()
+	// Zero-config: generate an id when the client doesn't send one
+	// (e.g. the Connect dialog), instead of rejecting the request.
+	if id, _ := body["id"].(string); strings.TrimSpace(id) == "" {
+		prefix, _ := body["provider"].(string)
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			prefix = "account"
+		}
+		body["id"] = nextAccountID(accounts, prefix)
+	}
 	acct, err := ValidateAccount(body)
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
-	accounts := s.deps.Accounts.Read()
 	for _, a := range accounts {
 		if a.ID == acct.ID {
 			writeError(w, 409, fmt.Sprintf("account '%s' already exists", acct.ID))
