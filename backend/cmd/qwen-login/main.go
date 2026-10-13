@@ -41,6 +41,9 @@ func main() {
 	if *password == "" {
 		*password = os.Getenv("QWEN_PASSWORD")
 	}
+	if os.Getenv("QWEN_HEADED") == "1" {
+		*headed = true
+	}
 	res := login(*email, *password, *headed)
 	out, _ := json.Marshal(res)
 	fmt.Println(string(out))
@@ -94,7 +97,14 @@ func login(email, password string, headed bool) result {
 	if !fillFirst(page, []string{`input[placeholder*="Email" i]`, `input[type="email"]`}, email) {
 		return result{Error: "email field not found"}
 	}
-	// Fill password.
+	// Password may be on the same form or behind a Continue step.
+	if !passwordVisible(page) {
+		// Multi-step login: submit the email first, then the password field appears.
+		clickFirst(page, []string{
+			`button:has-text("Continue")`, `button:has-text("Next")`, `button[type="submit"]`,
+		})
+		time.Sleep(2 * time.Second)
+	}
 	if !fillFirst(page, []string{`input[type="password"]`, `input[placeholder*="Password" i]`}, password) {
 		return result{Error: "password field not found"}
 	}
@@ -149,6 +159,15 @@ func localStorageToken(page playwright.Page) string {
 	}
 	tok, _ := raw.(string)
 	return strings.TrimSpace(strings.Trim(tok, `"`))
+}
+
+func passwordVisible(page playwright.Page) bool {
+	v, _ := page.Evaluate(`() => {
+		const el = document.querySelector('input[type="password"]');
+		return !!(el && el.offsetParent !== null);
+	}`)
+	b, _ := v.(bool)
+	return b
 }
 
 func codeChallengeVisible(page playwright.Page) bool {
