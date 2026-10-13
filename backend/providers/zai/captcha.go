@@ -511,7 +511,7 @@ func ComputeCaptchaParam(httpClient *http.Client, deviceToken string) (string, e
 		return captchaComputeOverride, nil
 	}
 	if strings.TrimSpace(deviceToken) == "" {
-		return "", fmt.Errorf("no device token in pool — open the dashboard Setup page and click 'Collect 20 tokens', then retry")
+		return "", fmt.Errorf("device token pool empty — collecting 20 tokens in the background, retry in about a minute (or collect manually on the Setup page)")
 	}
 	if v, ok := captchaCache.get(); ok {
 		return v, nil
