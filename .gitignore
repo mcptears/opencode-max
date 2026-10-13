@@ -9,3 +9,11 @@ settings.json
 data/
 proxy-providers.json
 providers.json
+# Go build artifacts (hadi branch)
+hadi-server
+hadi-server.exe
+zai-collect
+zai-collect.exe
+qwen-login
+qwen-login.exe
+/frontend/dist/
