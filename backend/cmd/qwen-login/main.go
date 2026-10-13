@@ -97,6 +97,13 @@ func login(email, password string, headed bool) result {
 	if !fillFirst(page, []string{`input[placeholder*="Email" i]`, `input[type="email"]`}, email) {
 		return result{Error: "email field not found"}
 	}
+	// The auth page defaults to verification-code mode — click
+	// "Log in with a password" to switch to password mode.
+	clickFirst(page, []string{
+		`text="Log in with a password"`, `a:has-text("Log in with a password")`,
+		`button:has-text("Log in with a password")`,
+	})
+	time.Sleep(2 * time.Second)
 	// Password may be on the same form or behind a Continue step.
 	if !passwordVisible(page) {
 		// Multi-step login: submit the email first, then the password field appears.
