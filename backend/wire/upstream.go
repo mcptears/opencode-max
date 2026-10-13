@@ -42,6 +42,10 @@ type Upstream struct {
 	MaxRetries      int
 	// ZaiTokenPool supplies auto-harvested device tokens for Z.ai captcha.
 	ZaiTokenPool zai.TokenPool
+	// OnZaiPoolEmpty, when set, is called (once per empty-pool hit) when a
+	// Z.ai chat finds no device token — the handler kicks off a background
+	// collection so the next request succeeds without manual Setup steps.
+	OnZaiPoolEmpty func()
 }
 
 type openAIMessage struct {
@@ -252,6 +256,13 @@ func (u *Upstream) forwardZai(ctx context.Context, ac *types.AccountConfig, prov
 	c := zai.NewClient(provider.BaseURL, ac.APIKey, u.HTTP)
 	c.DeviceToken = ac.DeviceToken
 	c.Pool = u.ZaiTokenPool
+	// Empty pool? Kick off a background harvest so the user doesn't have to
+	// hunt for the Setup page — the retry shortly after will succeed.
+	if strings.TrimSpace(ac.DeviceToken) == "" && u.ZaiTokenPool != nil && u.OnZaiPoolEmpty != nil {
+		if s, ok := u.ZaiTokenPool.(interface{ Count() int }); ok && s.Count() == 0 {
+			u.OnZaiPoolEmpty()
+		}
+	}
 	model := resolveModel(provider, req.Model)
 	raw := make([]struct {
 		Role    string
