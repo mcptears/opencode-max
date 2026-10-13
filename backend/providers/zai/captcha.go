@@ -50,8 +50,8 @@ const (
 )
 
 var (
-	aliyunAccessKey = firstNonEmpty(os.Getenv("ZAI_ALIYUN_ACCESS_KEY"), "3KYV44cZo8KxKMLSMi2qupDaSYD")
-	aliyunSecretKey = firstNonEmpty(os.Getenv("ZAI_ALIYUN_SECRET_KEY"), "3KYV46zPQDDkDCtremOYpjqTz9P")
+	aliyunAccessKey = firstNonEmpty(os.Getenv("ZAI_ALIYUN_ACCESS_KEY"), "3KceUCOX74KGpuZVyrM1fuk5GFR")
+	aliyunSecretKey = firstNonEmpty(os.Getenv("ZAI_ALIYUN_SECRET_KEY"), "3KceUBs4fJj9iaOEBX7YycB9ACj")
 )
 
 func firstNonEmpty(vals ...string) string {
@@ -511,7 +511,7 @@ func ComputeCaptchaParam(httpClient *http.Client, deviceToken string) (string, e
 		return captchaComputeOverride, nil
 	}
 	if strings.TrimSpace(deviceToken) == "" {
-		return "", fmt.Errorf("no device token — paste it from the browser (window.z_um.getToken() at chat.z.ai)")
+		return "", fmt.Errorf("no device token in pool — open the dashboard Setup page and click 'Collect 20 tokens', then retry")
 	}
 	if v, ok := captchaCache.get(); ok {
 		return v, nil
