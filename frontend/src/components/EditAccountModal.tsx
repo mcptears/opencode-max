@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { api } from '../api/client';
-import type { Account } from '../api/client';
+import { useEffect, useState } from 'react';
+import { api, proxyModeOf, redactProxy } from '../api/client';
+import type { Account, ProxyInfo } from '../api/client';
 
 export default function EditAccountModal({ account, onClose, onDone }: {
   account: Account;
@@ -9,28 +9,43 @@ export default function EditAccountModal({ account, onClose, onDone }: {
 }) {
   const [name, setName] = useState(account.name);
   const [priority, setPriority] = useState(account.priority);
-  const [useProxy, setUseProxy] = useState(account.useProxy !== false);
+  const [proxyMode, setProxyMode] = useState<'off' | 'pool' | 'single'>(proxyModeOf(account));
+  const [proxies, setProxies] = useState<ProxyInfo[]>([]);
+  const [proxyUrl, setProxyUrl] = useState('');
   const [cooldownMs, setCooldownMs] = useState(account.cooldownPeriod ?? 0);
   const [baseUrl, setBaseUrl] = useState(account.baseUrl ?? '');
   const [quotaLimit, setQuotaLimit] = useState(account.quotaLimit ?? 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    api.get<ProxyInfo[]>('/api/proxies').then((list) => {
+      setProxies(list);
+      const matched = list.find((p) => redactProxy(p.url) === (account.proxyUrl || ''));
+      if (matched) setProxyUrl(matched.url);
+    }).catch(() => {});
+  }, [account.proxyUrl]);
+
   const save = async () => {
     setSaving(true);
     setError('');
     try {
       // No credentials are sent — the server keeps the stored key/cookies.
-      await api.put(`/api/accounts/${account.id}`, {
+      // proxyUrl is only sent when a pool proxy is picked; when mode is
+      // "single" and nothing is picked, the key is omitted and the server
+      // keeps the stored pinned proxy.
+      const body: Record<string, unknown> = {
         id: account.id,
         name: name.trim() || account.id,
         provider: account.provider,
         priority,
-        useProxy,
+        proxyMode,
         cooldownPeriod: cooldownMs > 0 ? cooldownMs : undefined,
         baseUrl: baseUrl.trim() || undefined,
         quotaLimit: quotaLimit > 0 ? quotaLimit : undefined,
-      });
+      };
+      if (proxyMode === 'single' && proxyUrl) body.proxyUrl = proxyUrl;
+      await api.put(`/api/accounts/${account.id}`, body);
       onDone();
       onClose();
     } catch (e: any) {
@@ -73,13 +88,26 @@ export default function EditAccountModal({ account, onClose, onDone }: {
             <input className="input" type="number" min={0} value={quotaLimit} onChange={(e) => setQuotaLimit(Number(e.target.value) || 0)} />
             <small>Max requests in a rolling 5h window. 0 = unlimited.</small>
           </label>
-          <div className="toggle-row">
-            <div>
-              <div className="toggle-label">Route through proxy pool</div>
-              <div className="toggle-desc">Off = direct connection. Only OpenCode Zen really needs IP rotation.</div>
-            </div>
-            <label className="toggle"><input type="checkbox" checked={useProxy} onChange={(e) => setUseProxy(e.target.checked)} /><span className="track" /></label>
+          <div className="field">
+            <span>Proxy</span>
+            <select className="input" value={proxyMode} onChange={(e) => setProxyMode(e.target.value as 'off' | 'pool' | 'single')}>
+              <option value="off">Direct — no proxy</option>
+              <option value="pool">Pool — round-robin through all proxies</option>
+              <option value="single">Single proxy — always use one proxy</option>
+            </select>
+            <small>{proxyMode === 'off' ? 'Direct connection. Only OpenCode Zen really needs IP rotation.' : proxyMode === 'pool' ? 'Each request uses the next proxy in the pool, covering all of them.' : 'Every request for this account goes through the same proxy.'}</small>
           </div>
+          {proxyMode === 'single' && (
+            <label className="field">
+              <span>Pinned proxy</span>
+              <select className="input" value={proxyUrl} onChange={(e) => setProxyUrl(e.target.value)} disabled={proxies.length === 0}>
+                <option value="">{proxies.length === 0 ? 'No proxies in pool' : account.proxyUrl ? `Keep pinned proxy (${account.proxyUrl})` : 'Choose a proxy…'}</option>
+                {proxies.map((p) => (
+                  <option key={p.url} value={p.url}>{redactProxy(p.url)}{p.healthy ? '' : ' (down)'}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {error && <p className="form-error">{error}</p>}
         </div>
         <div className="modal-foot">
