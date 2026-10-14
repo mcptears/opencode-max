@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { Account } from '../api/client';
 import ConnectAccount from '../components/ConnectAccount';
+import CollectorDialog from '../components/CollectorDialog';
 
 const CONNECTABLE = [
   { id: 'qwen', name: 'Qwen' },
@@ -21,6 +22,7 @@ export default function Accounts() {
   const [showPicker, setShowPicker] = useState(false);
   const [connectProvider, setConnectProvider] = useState<{ id: string; name: string } | null>(null);
   const [tokens, setTokens] = useState<TokenStatus>({ count: 0, collecting: false, collectLog: '' });
+  const [showCollector, setShowCollector] = useState(false);
 
   const load = () => api.get<Account[]>('/api/accounts').then(setAccounts).catch(() => {});
   const loadTokens = () => api.get<TokenStatus>('/api/zai/tokens').then(setTokens).catch(() => {});
@@ -30,11 +32,6 @@ export default function Accounts() {
     const t = setInterval(loadTokens, 5000);
     return () => clearInterval(t);
   }, []);
-
-  const collect = async () => {
-    await api.post('/api/zai/tokens/collect?count=20');
-    loadTokens();
-  };
 
   const hasZai = accounts.some((a) => a.provider === 'zai');
 
@@ -67,12 +64,14 @@ export default function Accounts() {
             {tokens.collecting && <span className="badge badge-cooling">collecting…</span>}
           </p>
           <div style={{ marginTop: 12 }}>
-            <button className="btn" onClick={collect} disabled={tokens.collecting}>
-              {tokens.collecting ? 'Collecting…' : 'Collect 20 tokens'}
+            <button className="btn btn-primary" onClick={() => setShowCollector(true)}>
+              Collector setup…
             </button>
           </div>
         </div>
       )}
+
+      <CollectorDialog open={showCollector} onClose={() => { setShowCollector(false); loadTokens(); }} />
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="table-wrap">
