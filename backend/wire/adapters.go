@@ -7,6 +7,7 @@ import (
 
 	"github.com/mcptears/opencode-max/api"
 	"github.com/mcptears/opencode-max/pool"
+	"github.com/mcptears/opencode-max/proxy"
 	"github.com/mcptears/opencode-max/types"
 )
 
@@ -26,6 +27,8 @@ func toAPIAccount(a types.AccountConfig) api.AccountConfig {
 		out.Cookies = &a.Cookies
 	}
 	out.UseProxy = a.UseProxy
+	out.ProxyMode = a.ProxyMode
+	out.ProxyURL = a.ProxyURL
 	if a.CooldownPeriod != 0 {
 		out.CooldownPeriod = &a.CooldownPeriod
 	}
@@ -46,6 +49,8 @@ func fromAPIAccount(a api.AccountConfig) types.AccountConfig {
 		APIKey:   a.APIKey,
 		Priority: a.Priority,
 		UseProxy: a.UseProxy,
+		ProxyMode: a.ProxyMode,
+		ProxyURL: a.ProxyURL,
 	}
 	if a.Cookies != nil {
 		out.Cookies = *a.Cookies
@@ -82,6 +87,10 @@ func (a *PoolAdapter) Status() []api.AccountStatus {
 			Provider:       s.Provider,
 			Priority:       s.Priority,
 			UseProxy:       boolPtr(s.UsesProxy),
+			ProxyMode:      s.ProxyMode,
+			// The pinned proxy URL carries credentials — only the
+			// redacted form ever reaches the dashboard.
+			ProxyURL:       proxy.RedactProxy(s.ProxyURL),
 			State:          string(s.State),
 			CooldownEndsIn: s.CooldownLeft.Milliseconds(),
 			Usage5h:        s.Usage5h,
