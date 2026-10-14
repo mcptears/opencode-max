@@ -106,6 +106,29 @@ func TestValidateAccount(t *testing.T) {
 	if acct.Cookies == nil || *acct.Cookies != "c=1" {
 		t.Error("cookies should be trimmed")
 	}
+	// proxyMode single keeps the pinned proxy URL
+	single := map[string]any{"id": "a", "provider": "p", "apiKey": "k", "priority": float64(1), "proxyMode": "single", "proxyUrl": "http://user:pw@proxy.example.com:8080"}
+	acct, err = ValidateAccount(single)
+	if err != nil {
+		t.Fatalf("single proxyMode rejected: %v", err)
+	}
+	if acct.ProxyMode != "single" || acct.ProxyURL != "http://user:pw@proxy.example.com:8080" {
+		t.Errorf("single mode not preserved: mode=%q url=%q", acct.ProxyMode, acct.ProxyURL)
+	}
+	// proxyMode single without a URL is rejected
+	if _, err := ValidateAccount(map[string]any{"id": "a", "provider": "p", "apiKey": "k", "priority": float64(1), "proxyMode": "single"}); !IsBadRequest(err) {
+		t.Error("single proxyMode without proxyUrl should be a bad request")
+	}
+	// unknown proxyMode is rejected
+	if _, err := ValidateAccount(map[string]any{"id": "a", "provider": "p", "apiKey": "k", "priority": float64(1), "proxyMode": "random"}); !IsBadRequest(err) {
+		t.Error("unknown proxyMode should be a bad request")
+	}
+	// proxyMode off syncs useProxy=false
+	off := map[string]any{"id": "a", "provider": "p", "apiKey": "k", "priority": float64(1), "proxyMode": "off"}
+	acct, _ = ValidateAccount(off)
+	if acct.ProxyMode != "off" || acct.UseProxy == nil || *acct.UseProxy {
+		t.Error("proxyMode off should sync useProxy=false")
+	}
 }
 
 func TestValidateProviderInput(t *testing.T) {
