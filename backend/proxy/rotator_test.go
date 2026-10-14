@@ -249,3 +249,31 @@ func TestRedactSchemeLess(t *testing.T) {
 		t.Errorf("host missing in %q", got)
 	}
 }
+
+func TestManualCheckRawFormRecorded(t *testing.T) {
+	// Regression: the dashboard's manual "check health" passes the raw
+	// user-pasted proxy strings (no scheme). Results must be recorded
+	// under the normalized key so Status() reflects them.
+	raw := "user:pass@127.0.0.1:1"
+	r := New([]string{raw})
+	// Two consecutive failures mark it down.
+	r.CheckProxies([]string{raw}, "http://127.0.0.1:9/")
+	r.CheckProxies([]string{raw}, "http://127.0.0.1:9/")
+	if r.IsHealthy(raw) {
+		t.Fatal("expected raw-form proxy to be unhealthy after 2 failures")
+	}
+	st := r.Status()
+	found := false
+	for _, h := range st.Health {
+		found = true
+		if h.Healthy {
+			t.Fatalf("Status() still reports healthy for failed proxy: %+v", h)
+		}
+		if h.Fails < 2 {
+			t.Fatalf("Status() lost failure count for raw-form proxy: %+v", h)
+		}
+	}
+	if !found {
+		t.Fatal("Status() returned no health entries")
+	}
+}
