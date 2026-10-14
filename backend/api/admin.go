@@ -749,6 +749,22 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 			body["cookies"] = *accounts[i].Cookies
 		}
 	}
+	// Same for proxy mode: an edit that omits proxyMode keeps the stored
+	// mode, and an edit that keeps mode "single" without sending a new
+	// pinned proxy keeps the stored pinned proxy (the status view only
+	// exposes the redacted form, so the UI can't send the full URL back).
+	if _, hasMode := body["proxyMode"]; !hasMode {
+		body["proxyMode"] = accounts[i].ProxyMode
+		if accounts[i].ProxyMode == "single" {
+			if _, hasURL := body["proxyUrl"]; !hasURL {
+				body["proxyUrl"] = accounts[i].ProxyURL
+			}
+		}
+	} else if body["proxyMode"] == "single" {
+		if _, hasURL := body["proxyUrl"]; !hasURL {
+			body["proxyUrl"] = accounts[i].ProxyURL
+		}
+	}
 	body["id"] = id
 	acct, err := ValidateAccount(body)
 	if err != nil {
@@ -762,7 +778,9 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// handlePatchAccount toggles per-account proxy routing.
+// handlePatchAccount updates per-account proxy routing: proxyMode
+// ("off" direct, "pool" round-robin through the whole proxy pool,
+// "single" pinned to proxyUrl) or the legacy useProxy boolean.
 func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	body := decodeBody(r)
@@ -778,17 +796,50 @@ func (s *Server) handlePatchAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "account not found")
 		return
 	}
-	if up, ok := body["useProxy"].(bool); ok {
+	if mode, ok := body["proxyMode"].(string); ok {
+		mode = strings.TrimSpace(mode)
+		switch mode {
+		case "off", "pool", "single":
+			accounts[i].ProxyMode = mode
+			accounts[i].ProxyURL = ""
+			if mode == "off" {
+				accounts[i].UseProxy = boolPtr(false)
+			} else {
+				accounts[i].UseProxy = nil
+			}
+			if mode == "single" {
+				proxyURL, _ := body["proxyUrl"].(string)
+				proxyURL = strings.TrimSpace(proxyURL)
+				if proxyURL == "" {
+					writeError(w, 400, "proxyUrl is required for proxyMode \"single\"")
+					return
+				}
+				accounts[i].ProxyURL = proxyURL
+			}
+			s.deps.Accounts.Write(accounts)
+			s.deps.Pool.Replace(accounts)
+		default:
+			writeError(w, 400, "proxyMode must be off, pool, or single")
+			return
+		}
+	} else if up, ok := body["useProxy"].(bool); ok {
+		// Legacy toggle: false = direct, true = round-robin pool.
 		if up {
-			accounts[i].UseProxy = nil // default: proxy on
+			accounts[i].ProxyMode = "pool"
+			accounts[i].ProxyURL = ""
+			accounts[i].UseProxy = nil
 		} else {
+			accounts[i].ProxyMode = "off"
+			accounts[i].ProxyURL = ""
 			accounts[i].UseProxy = boolPtr(false)
 		}
 		s.deps.Accounts.Write(accounts)
 		s.deps.Pool.Replace(accounts)
 	}
-	useProxy := accounts[i].UseProxy == nil || *accounts[i].UseProxy
-	writeJSON(w, 200, map[string]any{"ok": true, "useProxy": useProxy})
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "useProxy": accounts[i].UseProxy == nil || *accounts[i].UseProxy,
+		"proxyMode": accounts[i].ProxyMode,
+	})
 }
 
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
