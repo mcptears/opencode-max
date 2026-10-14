@@ -29,6 +29,10 @@ type AccountConfig struct {
 	Cookies *string `json:"cookies,omitempty"`
 	// Nil = default (proxy on, legacy); false = connect directly, no proxy.
 	UseProxy *bool `json:"useProxy,omitempty"`
+	// ProxyMode: "" legacy, "off" direct, "pool" round-robin, "single" pinned.
+	ProxyMode string `json:"proxyMode,omitempty"`
+	// ProxyURL is the pinned proxy for mode "single" (full URL, internal only).
+	ProxyURL string `json:"proxyUrl,omitempty"`
 	// Ms the account stays parked after a 429/quota hit.
 	CooldownPeriod *int64 `json:"cooldownPeriod,omitempty"`
 	// Optional per-account upstream override.
@@ -44,6 +48,8 @@ type AccountStatus struct {
 	Provider       string  `json:"provider"`
 	Priority       int     `json:"priority"`
 	UseProxy       *bool   `json:"useProxy,omitempty"`
+	ProxyMode      string  `json:"proxyMode,omitempty"` // effective: off | pool | single
+	ProxyURL       string  `json:"proxyUrl,omitempty"`  // redacted when mode is single, "" otherwise
 	State          string  `json:"state"` // active | cooling_down | invalid
 	CooldownEndsIn int64   `json:"cooldownEndsInMs"`
 	Usage5h        int     `json:"usage5h"`
@@ -353,7 +359,28 @@ func ValidateAccount(body map[string]any) (AccountConfig, error) {
 		Cookies: strPtr(str("cookies")),
 	}
 	// useProxy: false opts out (direct); anything else = default (proxy on).
-	if up, ok := body["useProxy"].(bool); ok && !up {
+	// proxyMode, when present, wins and is kept in sync with useProxy.
+	if mode, ok := body["proxyMode"].(string); ok && strings.TrimSpace(mode) != "" {
+		mode = strings.TrimSpace(mode)
+		switch mode {
+		case "off", "pool", "single":
+			acct.ProxyMode = mode
+			if mode == "off" {
+				acct.UseProxy = boolPtr(false)
+			} else {
+				acct.UseProxy = nil
+			}
+			if mode == "single" {
+				proxyURL := str("proxyUrl")
+				if proxyURL == "" {
+					return AccountConfig{}, errBad("proxyUrl is required for proxyMode \"single\"")
+				}
+				acct.ProxyURL = proxyURL
+			}
+		default:
+			return AccountConfig{}, errBad("proxyMode must be off, pool, or single")
+		}
+	} else if up, ok := body["useProxy"].(bool); ok && !up {
 		acct.UseProxy = boolPtr(false)
 	}
 	if cp, ok := toFloat(body["cooldownPeriod"]); ok && cp > 0 {
