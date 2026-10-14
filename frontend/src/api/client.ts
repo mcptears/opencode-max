@@ -30,6 +30,11 @@ export interface Account {
   provider: string;
   priority: number;
   useProxy?: boolean;
+  // Effective proxy mode: "off" direct, "pool" round-robin through the
+  // whole proxy pool, "single" pinned to proxyUrl. Absent = legacy.
+  proxyMode?: string;
+  // Pinned proxy URL in REDACTED form (user:***@host) when mode is single.
+  proxyUrl?: string;
   cooldownPeriod?: number;
   baseUrl?: string;
   quotaLimit?: number;
@@ -54,4 +59,23 @@ export interface ProxyInfo {
   healthy: boolean;
   lastCheck?: number;
   latencyMs?: number;
+}
+
+// Display-side redaction: never show proxy passwords in the UI.
+export function redactProxy(url: string): string {
+  try {
+    const u = new URL(url.includes('://') ? url : `http://${url}`);
+    if (u.username || u.password) return `${u.protocol}//***@${u.host}`;
+    return url;
+  } catch {
+    const at = url.indexOf('@');
+    return at >= 0 ? `***@${url.slice(at + 1)}` : url;
+  }
+}
+
+// Effective proxy mode for an account: explicit proxyMode wins, legacy
+// accounts follow useProxy (false = off, anything else = pool).
+export function proxyModeOf(a: Account): 'off' | 'pool' | 'single' {
+  if (a.proxyMode === 'off' || a.proxyMode === 'pool' || a.proxyMode === 'single') return a.proxyMode;
+  return a.useProxy === false ? 'off' : 'pool';
 }
