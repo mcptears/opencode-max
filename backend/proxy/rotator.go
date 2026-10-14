@@ -380,7 +380,7 @@ func (r *Rotator) QualityOf(proxyURL string) *ProxyQuality {
 func (r *Rotator) IsHealthy(proxyURL string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	st, ok := r.health[proxyURL]
+	st, ok := r.health[NormalizeProxyURL(proxyURL)]
 	return !ok || st.healthy
 }
 
@@ -576,6 +576,9 @@ func (r *Rotator) CheckProxies(proxies []string, target string) {
 }
 
 func (r *Rotator) checkOne(proxyURL, target string) {
+	// Normalize so results are recorded under the same key Status()
+	// reports (callers may pass the raw user-pasted form without scheme).
+	proxyURL = NormalizeProxyURL(proxyURL)
 	r.mu.RLock()
 	hook := r.onHealthChange
 	r.mu.RUnlock()
