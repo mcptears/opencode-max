@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import CollectorDialog from '../components/CollectorDialog';
 
 interface TokenStatus {
   count: number;
@@ -9,6 +10,7 @@ interface TokenStatus {
 
 export default function Setup() {
   const [tokens, setTokens] = useState<TokenStatus>({ count: 0, collecting: false, collectLog: '' });
+  const [showCollector, setShowCollector] = useState(false);
 
   const loadTokens = () =>
     api.get<TokenStatus>('/api/zai/tokens').then(setTokens).catch(() => {});
@@ -18,11 +20,6 @@ export default function Setup() {
     const t = setInterval(loadTokens, 5000);
     return () => clearInterval(t);
   }, []);
-
-  const collect = async () => {
-    await api.post('/api/zai/tokens/collect?count=20');
-    loadTokens();
-  };
 
   const clear = async () => {
     if (!confirm('Clear all harvested device tokens?')) return;
@@ -61,8 +58,8 @@ export default function Setup() {
           {tokens.collecting && <span className="badge badge-cooling">collecting…</span>}
         </p>
         <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={collect} disabled={tokens.collecting}>
-            {tokens.collecting ? 'Collecting…' : 'Collect 20 tokens'}
+          <button className="btn btn-primary" onClick={() => setShowCollector(true)}>
+            Collector setup…
           </button>
           <button className="btn btn-ghost" onClick={clear} disabled={tokens.count === 0}>
             Clear
@@ -75,6 +72,7 @@ export default function Setup() {
           }}>{tokens.collectLog}</pre>
         )}
       </div>
+      <CollectorDialog open={showCollector} onClose={() => { setShowCollector(false); loadTokens(); }} />
     </div>
   );
 }
