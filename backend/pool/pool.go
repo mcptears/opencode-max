@@ -60,6 +60,8 @@ type AccountStatus struct {
 	Provider       string
 	Priority       int
 	UsesProxy      bool
+	ProxyMode      string // effective: off | pool | single
+	ProxyURL       string // pinned proxy URL (raw; the wire adapter redacts it)
 	State          AccountState
 	CooldownLeft   time.Duration
 	Usage5h        int
@@ -463,6 +465,8 @@ func (p *Pool) Status() []AccountStatus {
 			Provider:       a.Provider,
 			Priority:       a.Priority,
 			UsesProxy:      a.ProxyEnabled(),
+			ProxyMode:      a.ProxyModeEffective(),
+			ProxyURL:       a.ProxyURL,
 			State:          state,
 			CooldownLeft:   left,
 			Usage5h:        usage,
