@@ -199,12 +199,15 @@ func resolveModel(provider *types.ProviderConfig, requested string) string {
 
 func (u *Upstream) forwardQwen(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req openAIRequest, stream bool) (io.ReadCloser, error) {
 	c := qwen.NewClient(provider.BaseURL)
+	if client := u.clientFor(ac); client != nil {
+		c.HTTP = client
+	}
 	model := resolveModel(provider, req.Model)
 	return c.ChatCompletion(ac.APIKey, ac.Cookies, model, flattenMessages(req.Messages), stream)
 }
 
 func (u *Upstream) forwardDeepSeek(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req openAIRequest, stream bool) (io.ReadCloser, error) {
-	c := deepseek.NewClient(provider.BaseURL, ac.APIKey, ac.Cookies, u.HTTP)
+	c := deepseek.NewClient(provider.BaseURL, ac.APIKey, ac.Cookies, u.clientFor(ac))
 	model := resolveModel(provider, req.Model)
 	msgs := flattenToString(req.Messages)
 	thinking, search := false, false
@@ -253,7 +256,7 @@ func (u *Upstream) forwardDeepSeek(ctx context.Context, ac *types.AccountConfig,
 }
 
 func (u *Upstream) forwardZai(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req openAIRequest, stream bool) (io.ReadCloser, error) {
-	c := zai.NewClient(provider.BaseURL, ac.APIKey, u.HTTP)
+	c := zai.NewClient(provider.BaseURL, ac.APIKey, u.clientFor(ac))
 	c.DeviceToken = ac.DeviceToken
 	c.Pool = u.ZaiTokenPool
 	// Empty pool? Kick off a background harvest so the user doesn't have to
@@ -361,12 +364,12 @@ func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, p
 		httpReq.Header.Set("User-Agent", ua)
 	}
 
-	// Proxy or direct per account setting.
-	var client *http.Client
-	if ac.ProxyEnabled() {
-		client = u.Rotator.HTTPClient(u.Rotator.Current())
-	} else {
-		client = u.HTTP
+	// Proxy or direct, per the account's proxy mode:
+	// off = direct, single = pinned proxy, pool = round-robin through
+	// the whole proxy pool (one rotation per request).
+	client := u.clientFor(ac)
+	if client == nil {
+		client = http.DefaultClient
 	}
 
 	resp, err := client.Do(httpReq)
@@ -380,6 +383,31 @@ func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, p
 		}
 	}
 	return api.ForwardResult{Status: resp.StatusCode, Headers: headers, Body: resp.Body}, nil
+}
+
+// clientFor resolves the HTTP client for one account's proxy mode.
+// "off" returns the direct client, "single" a client pinned to the
+// account's proxy URL, "pool" a client on the next proxy in the pool
+// (the rotator advances once per call, so pool traffic round-robins
+// across every proxy). A nil rotator means direct.
+func (u *Upstream) clientFor(ac *types.AccountConfig) *http.Client {
+	switch ac.ProxyModeEffective() {
+	case "off":
+		return u.HTTP
+	case "single":
+		if u.Rotator != nil {
+			if p := strings.TrimSpace(ac.ProxyURL); p != "" {
+				return u.Rotator.HTTPClient(p)
+			}
+			return u.Rotator.HTTPClient(u.Rotator.Rotate())
+		}
+		return u.HTTP
+	default: // "pool"
+		if u.Rotator != nil {
+			return u.Rotator.HTTPClient(u.Rotator.Rotate())
+		}
+		return u.HTTP
+	}
 }
 
 // matchProvider mirrors providers.MatchProvider.
