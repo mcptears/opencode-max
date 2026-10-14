@@ -19,6 +19,8 @@ export const api = {
     req<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   put: <T>(p: string, body?: unknown) =>
     req<T>(p, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
+  patch: <T>(p: string, body?: unknown) =>
+    req<T>(p, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   del: <T>(p: string) => req<T>(p, { method: 'DELETE' }),
 };
 
@@ -27,14 +29,15 @@ export interface Account {
   name: string;
   provider: string;
   priority: number;
-  cookies?: string;
-  deviceToken?: string;
   useProxy?: boolean;
   cooldownPeriod?: number;
   baseUrl?: string;
   quotaLimit?: number;
   state?: 'active' | 'cooling_down' | 'invalid';
-  cooldownUntil?: number;
+  cooldownEndsInMs?: number;
+  usage5h?: number;
+  avgLatencyMs?: number;
+  inflight?: number;
 }
 
 export interface Provider {
