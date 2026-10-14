@@ -739,6 +739,13 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	} else if k, _ := body["apiKey"].(string); strings.TrimSpace(k) == "" {
 		body["apiKey"] = accounts[i].APIKey
 	}
+	// Same for session cookies: the dashboard status view never exposes
+	// them, so an edit that omits cookies must keep the stored session.
+	if c, _ := body["cookies"].(string); strings.TrimSpace(c) == "" {
+		if accounts[i].Cookies != nil {
+			body["cookies"] = *accounts[i].Cookies
+		}
+	}
 	body["id"] = id
 	acct, err := ValidateAccount(body)
 	if err != nil {
