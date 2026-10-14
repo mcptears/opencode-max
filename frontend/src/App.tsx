@@ -9,6 +9,7 @@ import Logs from './pages/Logs';
 import Setup from './pages/Setup';
 
 type Section = 'overview' | 'accounts' | 'providers' | 'playground' | 'proxies' | 'settings' | 'logs' | 'setup';
+export type { Section };
 
 const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: '📊' },
@@ -46,7 +47,7 @@ export default function App() {
         ))}
       </nav>
       <main className="main">
-        {section === 'overview' && <Overview />}
+        {section === 'overview' && <Overview onNavigate={setSection} />}
         {section === 'accounts' && <Accounts />}
         {section === 'providers' && <Providers />}
         {section === 'playground' && <Playground />}
