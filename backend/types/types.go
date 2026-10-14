@@ -28,6 +28,15 @@ type AccountConfig struct {
 	// UseProxy: when false the account connects directly without a proxy.
 	// Nil (absent) preserves the legacy default of true.
 	UseProxy *bool `json:"useProxy,omitempty"`
+	// ProxyMode selects how the account uses the proxy pool, like 9router's
+	// per-connection proxy binding: "" (legacy — follows UseProxy),
+	// "off" (direct), "pool" (round-robin through the whole proxy pool),
+	// "single" (pinned to ProxyURL).
+	ProxyMode string `json:"proxyMode,omitempty"`
+	// ProxyURL is the pinned proxy for ProxyMode "single". Stored with
+	// credentials like other secrets; the dashboard status view only ever
+	// exposes the redacted form.
+	ProxyURL string `json:"proxyUrl,omitempty"`
 	// CooldownPeriod is how long (ms) the account stays parked after a
 	// 429/quota hit. Zero means use the global default.
 	CooldownPeriod int64 `json:"cooldownPeriod,omitempty"`
@@ -37,10 +46,23 @@ type AccountConfig struct {
 	QuotaLimit int `json:"quotaLimit,omitempty"`
 }
 
-// ProxyEnabled reports whether the account should route through the proxy
-// pool. Absent (nil) means true, preserving legacy behavior.
+// ProxyModeEffective resolves the account's proxy mode. Legacy accounts
+// (no ProxyMode) follow UseProxy: explicit false means "off", anything
+// else means "pool" — round-robin through the whole proxy pool.
+func (a AccountConfig) ProxyModeEffective() string {
+	switch a.ProxyMode {
+	case "off", "pool", "single":
+		return a.ProxyMode
+	}
+	if a.UseProxy != nil && !*a.UseProxy {
+		return "off"
+	}
+	return "pool"
+}
+
+// ProxyEnabled reports whether the account should route through a proxy.
 func (a AccountConfig) ProxyEnabled() bool {
-	return a.UseProxy == nil || *a.UseProxy
+	return a.ProxyModeEffective() != "off"
 }
 
 // RuntimeConfig is the process-level configuration loaded from env vars.
