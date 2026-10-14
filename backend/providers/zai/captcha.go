@@ -532,7 +532,11 @@ func ComputeCaptchaParam(httpClient *http.Client, deviceToken string) (string, e
 		return "", err
 	}
 	combined := aliHash(string(trackJSON), "0000") + string(trackJSON)
-	finalVal := captchaEncrypt(zlibCompress([]byte(combined)))
+	compressed := zlibCompress([]byte(combined))
+	// Reference method: base64 the compressed bytes BEFORE encrypting.
+	// Encrypting raw zlib bytes produces a data value Aliyun rejects
+	// (VerifyCaptchaV3 VerifyResult=false, VerifyCode F017).
+	finalVal := captchaEncrypt([]byte(base64.StdEncoding.EncodeToString(compressed)))
 	param, err := verifyCaptcha(httpClient, certifyID, finalVal, deviceToken)
 	if err != nil {
 		return "", err
