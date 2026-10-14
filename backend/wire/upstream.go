@@ -389,25 +389,23 @@ func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, p
 // "off" returns the direct client, "single" a client pinned to the
 // account's proxy URL, "pool" a client on the next proxy in the pool
 // (the rotator advances once per call, so pool traffic round-robins
-// across every proxy). A nil rotator means direct.
+// across every proxy). When there is no proxy to use (direct mode, empty
+// pool, or no rotator), it returns u.HTTP — the standard client, which
+// honors ProxyFromEnvironment — instead of a raw direct dialer.
 func (u *Upstream) clientFor(ac *types.AccountConfig) *http.Client {
+	var proxyURL string
 	switch ac.ProxyModeEffective() {
-	case "off":
-		return u.HTTP
 	case "single":
+		proxyURL = strings.TrimSpace(ac.ProxyURL)
+	case "pool":
 		if u.Rotator != nil {
-			if p := strings.TrimSpace(ac.ProxyURL); p != "" {
-				return u.Rotator.HTTPClient(p)
-			}
-			return u.Rotator.HTTPClient(u.Rotator.Rotate())
+			proxyURL = u.Rotator.Rotate()
 		}
-		return u.HTTP
-	default: // "pool"
-		if u.Rotator != nil {
-			return u.Rotator.HTTPClient(u.Rotator.Rotate())
-		}
+	}
+	if proxyURL == "" || u.Rotator == nil {
 		return u.HTTP
 	}
+	return u.Rotator.HTTPClient(proxyURL)
 }
 
 // matchProvider mirrors providers.MatchProvider.
