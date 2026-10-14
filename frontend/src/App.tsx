@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import './hadi.css';
 import Overview from './pages/Overview';
 import Accounts from './pages/Accounts';
 import Providers from './pages/Providers';
@@ -29,7 +28,7 @@ export default function App() {
     <div className="app">
       <nav className="sidebar">
         <div className="brand">
-          <span style={{ fontSize: 28 }}>⚡</span>
+          <div className="brand-mark">⚡</div>
           <div>
             <h1>Hadi</h1>
             <small>ZEN PROXY CONTROL</small>
