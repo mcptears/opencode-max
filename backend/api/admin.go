@@ -1336,15 +1336,71 @@ func (s *Server) handleZaiTokensClear(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// toInt converts a decoded JSON number (json.Number via UseNumber,
+// float64) or string to int.
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i), true
+		}
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case string:
+		if i, err := strconv.Atoi(n); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 func (s *Server) handleZaiTokensCollect(w http.ResponseWriter, r *http.Request) {
 	if zaiCollectRunning.Load() {
 		writeError(w, 409, "collection already running")
 		return
 	}
-	count := queryInt(r, "count", 20, 1, 200)
-	zaiCollectRunning.Store(true)
-	go runZaiCollect(count)
-	writeJSON(w, 202, map[string]any{"ok": true, "started": true, "count": count})
+	// Options come from a JSON body {tokens, batches, parallel, headed,
+	// blockTrackers, unsafe, count} or query params. Legacy ?count= still
+	// means a single batch of exactly that many tokens.
+	opts := ZaiCollectOptions{}
+	body := decodeBody(r)
+	if len(body) > 0 {
+		if v, ok := toInt(body["tokens"]); ok {
+			opts.Tokens = v
+		}
+		if v, ok := toInt(body["batches"]); ok {
+			opts.Batches = v
+		}
+		if v, ok := toInt(body["parallel"]); ok {
+			opts.Parallel = v
+		}
+		if v, ok := body["headed"].(bool); ok {
+			opts.Headed = v
+		}
+		if v, ok := body["blockTrackers"].(bool); ok {
+			opts.BlockTrackers = v
+		}
+		if v, ok := body["unsafe"].(bool); ok {
+			opts.Unsafe = v
+		}
+		if v, ok := toInt(body["count"]); ok {
+			opts.Count = v
+		}
+	}
+	if q := r.URL.Query().Get("count"); q != "" {
+		opts.Count = queryInt(r, "count", 20, 1, 200)
+	}
+	if opts.Count <= 0 && opts.Tokens <= 0 && opts.Batches <= 0 {
+		// No options at all: legacy quick collect of 20.
+		opts.Count = 20
+	}
+	if !RunZaiCollectOpts(opts) {
+		writeError(w, 409, "collection already running")
+		return
+	}
+	writeJSON(w, 202, map[string]any{"ok": true, "started": true})
 }
 
 var scraperFormats = map[string]bool{"text": true, "geonode": true, "spys": true, "fpl": true, "proxynova": true}
