@@ -72,19 +72,34 @@ export default function Playground() {
 
   return (
     <div>
-      <h1 className="page-title">Playground</h1>
-      <p className="page-sub">Chat with a connected model to verify it before wiring it to external agents</p>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Playground</h1>
+          <p className="page-sub">Chat with a connected model to verify it before wiring it to external agents</p>
+        </div>
+      </div>
       <div className="card">
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <select value={model} onChange={(e) => setModel(e.target.value)} style={{ flex: 1 }}>
-            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <select className="input" value={model} onChange={(e) => setModel(e.target.value)} style={{ flex: 1 }} disabled={!models.length}>
+            {models.length === 0 ? (
+              <option value="">No models available — connect an account first</option>
+            ) : (
+              models.map((m) => <option key={m} value={m}>{m}</option>)
+            )}
           </select>
-          <button className="btn btn-ghost" onClick={() => setMsgs([])}>New chat</button>
+          <button className="btn btn-ghost" onClick={() => setMsgs([])} disabled={!msgs.length}>New chat</button>
         </div>
         <div className="chat-box" ref={boxRef}>
-          {msgs.map((m, i) => (
-            <div key={i} className={`msg msg-${m.role}`}>{m.content || '…'}</div>
-          ))}
+          {msgs.length === 0 ? (
+            <div className="empty" style={{ margin: 'auto' }}>
+              <span className="empty-ic">💬</span>
+              {models.length === 0 ? 'No models yet. Connect an account on the Accounts page.' : 'Pick a model and send a message to test it live.'}
+            </div>
+          ) : (
+            msgs.map((m, i) => (
+              <div key={i} className={`msg msg-${m.role}`}>{m.content || '…'}</div>
+            ))
+          )}
         </div>
         <div className="chat-input">
           <textarea
@@ -93,8 +108,9 @@ export default function Playground() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
             placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+            disabled={!models.length}
           />
-          <button className="btn btn-primary" onClick={send} disabled={busy}>Send</button>
+          <button className="btn btn-primary" onClick={send} disabled={busy || !models.length}>Send</button>
         </div>
       </div>
     </div>
