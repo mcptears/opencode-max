@@ -61,6 +61,7 @@ func findZaiCollect() string {
 
 // TriggerZaiCollect starts a background device-token harvest unless one is
 // already running. Safe to call from non-api packages (e.g. wire).
+// Legacy single-batch form used by the pool-empty auto-collect.
 func TriggerZaiCollect(count int) {
 	if zaiCollectRunning.Load() {
 		return
@@ -69,17 +70,69 @@ func TriggerZaiCollect(count int) {
 		count = 20
 	}
 	zaiCollectRunning.Store(true)
-	go runZaiCollect(count)
+	go runZaiCollectOpts(ZaiCollectOptions{Count: count})
 }
 
-func runZaiCollect(count int) {	defer zaiCollectRunning.Store(false)
+// ZaiCollectOptions mirrors the zai-collect CLI flags. Count, when set,
+// wins (single batch of exactly Count tokens — dashboard quick collect).
+// Otherwise Tokens x Batches drives the full multi-batch run.
+type ZaiCollectOptions struct {
+	Count         int  `json:"count"`
+	Tokens        int  `json:"tokens"`
+	Batches       int  `json:"batches"`
+	Parallel      int  `json:"parallel"`
+	Headed        bool `json:"headed"`
+	BlockTrackers bool `json:"blockTrackers"`
+	Unsafe        bool `json:"unsafe"`
+}
+
+// RunZaiCollectOpts starts a background harvest with the given options
+// unless one is already running.
+func RunZaiCollectOpts(o ZaiCollectOptions) bool {
+	if zaiCollectRunning.Load() {
+		return false
+	}
+	zaiCollectRunning.Store(true)
+	go runZaiCollectOpts(o)
+	return true
+}
+
+func runZaiCollectOpts(o ZaiCollectOptions) {
+	defer zaiCollectRunning.Store(false)
 	bin := findZaiCollect()
 	if bin == "" {
 		zaiCollectAppend("zai-collect binary not found next to the server or on PATH\n")
 		return
 	}
+	args := []string{}
+	switch {
+	case o.Count > 0:
+		args = append(args, "--count", strconv.Itoa(o.Count))
+	default:
+		tokens := o.Tokens
+		if tokens <= 0 {
+			tokens = 850
+		}
+		batches := o.Batches
+		if batches <= 0 {
+			batches = 5
+		}
+		args = append(args, "--tokens", strconv.Itoa(tokens), "--batch", strconv.Itoa(batches))
+		if o.Parallel > 1 {
+			args = append(args, "--parallel", strconv.Itoa(o.Parallel))
+		}
+		if o.Headed {
+			args = append(args, "--headed")
+		}
+		if o.BlockTrackers {
+			args = append(args, "--block-trackers")
+		}
+		if o.Unsafe {
+			args = append(args, "--unsafe")
+		}
+	}
 	zaiCollectAppend(time.Now().Format("15:04:05") + " starting collection...\n")
-	cmd := exec.Command(bin, "--count", strconv.Itoa(count))
+	cmd := exec.Command(bin, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -90,4 +143,8 @@ func runZaiCollect(count int) {	defer zaiCollectRunning.Store(false)
 		return
 	}
 	zaiCollectAppend("collection finished\n")
+}
+
+func runZaiCollect(count int) {
+	runZaiCollectOpts(ZaiCollectOptions{Count: count})
 }
