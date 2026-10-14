@@ -274,11 +274,13 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		if rq.AccountID != "" {
 			msg += " via " + rq.AccountID
 		}
+		lat := rq.LatencyMs
 		feed = append(feed, logEntry{
-			Time:    time.UnixMilli(rq.T).Format("15:04:05"),
-			Kind:    "request",
-			Message: msg,
-			Status:  &st,
+			Time:      time.UnixMilli(rq.T).Format("15:04:05"),
+			Kind:      "request",
+			Message:   msg,
+			Status:    &st,
+			LatencyMs: &lat,
 		})
 	}
 	for _, ev := range s.deps.Metrics.RecentEvents(50) {
@@ -310,10 +312,11 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 // logEntry is the dashboard-friendly log row.
 type logEntry struct {
-	Time    string `json:"time"`
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
-	Status  *int   `json:"status,omitempty"`
+	Time      string `json:"time"`
+	Kind      string `json:"kind"`
+	Message   string `json:"message"`
+	Status    *int   `json:"status,omitempty"`
+	LatencyMs *int   `json:"latencyMs,omitempty"`
 }
 
 func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request) {
