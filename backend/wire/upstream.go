@@ -200,10 +200,30 @@ func resolveModel(provider *types.ProviderConfig, requested string) string {
 func (u *Upstream) forwardQwen(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req openAIRequest, stream bool) (io.ReadCloser, error) {
 	c := qwen.NewClient(provider.BaseURL)
 	if client := u.clientFor(ac); client != nil {
-		c.HTTP = client
+		c.HTTP = chromeTLSClient(client)
 	}
 	model := resolveModel(provider, req.Model)
 	return c.ChatCompletion(ac.APIKey, ac.Cookies, model, flattenMessages(req.Messages), stream)
+}
+
+// chromeTLSClient returns a copy of client whose TLS handshakes impersonate
+// Chrome. Qwen's Baxia WAF fingerprints the TLS ClientHello; Go's stock
+// fingerprint is a strong bot signal even when headers and cookies are
+// browser-perfect.
+func chromeTLSClient(client *http.Client) *http.Client {
+	out := &http.Client{Timeout: client.Timeout}
+	if tr, ok := client.Transport.(*http.Transport); ok {
+		out.Transport = proxy.ChromeTLSClone(tr)
+	} else {
+		out.Transport = proxy.ChromeTLSClone(nil)
+	}
+	if client.Jar != nil {
+		out.Jar = client.Jar
+	}
+	if client.CheckRedirect != nil {
+		out.CheckRedirect = client.CheckRedirect
+	}
+	return out
 }
 
 func (u *Upstream) forwardDeepSeek(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req openAIRequest, stream bool) (io.ReadCloser, error) {
