@@ -235,7 +235,7 @@ export class IpRotator {
   }
 
   /** Start periodic health probing. Two consecutive failures mark a proxy down. */
-  startHealthChecks(intervalMs = 60000, target = 'https://opencode.ai/zen/v1/models'): void {
+  startHealthChecks(intervalMs = 60000, target = 'https://opencode.ai/inference/v1/models'): void {
     if (this.timer || this.proxies.length === 0) return;
     const run = (): void => {
       void this.checkAll(target);
@@ -250,12 +250,12 @@ export class IpRotator {
     this.timer = undefined;
   }
 
-  async checkAll(target = 'https://opencode.ai/zen/v1/models'): Promise<void> {
+  async checkAll(target = 'https://opencode.ai/inference/v1/models'): Promise<void> {
     await this.checkProxies(this.proxies, target);
   }
 
   /** Probe a subset of proxies on demand (dashboard "Check health"). */
-  async checkProxies(proxies: string[], target = 'https://opencode.ai/zen/v1/models'): Promise<void> {
+  async checkProxies(proxies: string[], target = 'https://opencode.ai/inference/v1/models'): Promise<void> {
     await Promise.allSettled(proxies.map((p) => this.checkOne(p, target)));
   }
 

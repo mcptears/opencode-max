@@ -4,9 +4,11 @@
 // proxies.json and settings.json files.
 package types
 
-// DefaultUpstreamBase is the OpenCode Zen base URL used when no
+import "github.com/mcptears/opencode-max/zen"
+
+// DefaultUpstreamBase is the OpenCode Zen Console gateway used when no
 // UPSTREAM_BASE env var (or settings override) is configured.
-const DefaultUpstreamBase = "https://opencode.ai/zen/v1"
+const DefaultUpstreamBase = zen.ConsoleBase
 
 // AccountConfig is a single upstream credential in the account pool.
 type AccountConfig struct {
@@ -42,6 +44,9 @@ type AccountConfig struct {
 	CooldownPeriod int64 `json:"cooldownPeriod,omitempty"`
 	// BaseURL is an optional per-account upstream override.
 	BaseURL string `json:"baseUrl,omitempty"`
+	// Plan selects the Zen gateway for this account: "console" (pay-as-you-go)
+	// or "go". Empty inherits the provider/global default.
+	Plan string `json:"plan,omitempty"`
 	// QuotaLimit is an optional per-account rolling 5h request budget.
 	QuotaLimit int `json:"quotaLimit,omitempty"`
 }
@@ -130,6 +135,8 @@ type ProviderConfig struct {
 	Name string `json:"name"`
 	// BaseURL is the OpenAI-compatible base URL.
 	BaseURL string `json:"baseUrl"`
+	// Plan selects the Zen gateway: "console" or "go" (empty = console).
+	Plan string `json:"plan,omitempty"`
 	// Models are glob patterns matched against the request model, in order.
 	// "*" is the catch-all.
 	Models  []string `json:"models"`

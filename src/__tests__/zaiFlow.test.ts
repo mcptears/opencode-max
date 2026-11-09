@@ -2,12 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import fs from 'node:fs';
-import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { validateZaiCredential, zaiChatCompletion } from '../zaiWeb.js';
 import { buildAdminRouter } from '../adminRoutes.js';
-import { projectRoot } from '../paths.js';
+import { PROVIDERS_FILE } from '../providers.js';
 import { AccountPool } from '../accountPool.js';
 import { IpRotator } from '../ipRotator.js';
 import { SessionManager } from '../sessionManager.js';
@@ -146,7 +145,7 @@ describe('Z.ai admin endpoints', () => {
   let server: Server | null = null;
   const auth = { Authorization: 'Bearer ' + 'test' + '-token' };
   const accountsFile = process.env.ACCOUNTS_FILE!;
-  const providersFile = path.join(projectRoot(), 'providers.json');
+  const providersFile = PROVIDERS_FILE;
 
   beforeAll(async () => {
     saveSettings({ adminToken: 'test-token' });

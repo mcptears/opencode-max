@@ -35,6 +35,7 @@ func toAPIAccount(a types.AccountConfig) api.AccountConfig {
 	if a.BaseURL != "" {
 		out.BaseURL = &a.BaseURL
 	}
+	out.Plan = a.Plan
 	if a.QuotaLimit != 0 {
 		out.QuotaLimit = &a.QuotaLimit
 	}
@@ -61,6 +62,7 @@ func fromAPIAccount(a api.AccountConfig) types.AccountConfig {
 	if a.BaseURL != nil {
 		out.BaseURL = *a.BaseURL
 	}
+	out.Plan = a.Plan
 	if a.QuotaLimit != nil {
 		out.QuotaLimit = *a.QuotaLimit
 	}
@@ -86,6 +88,7 @@ func (a *PoolAdapter) Status() []api.AccountStatus {
 			Name:           s.Name,
 			Provider:       s.Provider,
 			Priority:       s.Priority,
+			Plan:           s.Plan,
 			UseProxy:       boolPtr(s.UsesProxy),
 			ProxyMode:      s.ProxyMode,
 			// The pinned proxy URL carries credentials — only the

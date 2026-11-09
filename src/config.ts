@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { CONSOLE_BASE, normalizeBase, normalizePlan, type ZenPlan } from './zen.js';
 
 export interface AccountConfig {
   id: string;
@@ -17,6 +18,8 @@ export interface AccountConfig {
   cooldownPeriod?: number;
   /** Optional per-account upstream override (defaults to UPSTREAM_BASE). */
   baseUrl?: string;
+  /** Zen gateway plan: 'console' (pay-as-you-go) or 'go'. */
+  plan?: ZenPlan;
   /** Optional per-account rolling 5h request budget (defaults to QUOTA_5H_LIMIT). */
   quotaLimit?: number;
 }
@@ -40,7 +43,7 @@ const num = (v: string | undefined, fallback: number): number => {
 
 export const CONFIG: RuntimeConfig = {
   port: num(process.env.PORT, 8080),
-  upstreamBase: (process.env.UPSTREAM_BASE ?? 'https://opencode.ai/zen/v1').replace(/\/+$/, ''),
+  upstreamBase: normalizeBase(process.env.UPSTREAM_BASE ?? CONSOLE_BASE),
   accountsFile: process.env.ACCOUNTS_FILE ?? path.resolve('accounts.json'),
   proxiesFile: process.env.PROXIES_FILE ?? path.resolve('proxies.json'),
   maxRetries: num(process.env.MAX_RETRIES, 5),
@@ -68,6 +71,10 @@ export function loadAccounts(filePath: string): AccountConfig[] {
         typeof a.provider !== 'string' || typeof a.priority !== 'number') {
       throw new Error(`invalid account entry (id/provider/apiKey/priority required): ${JSON.stringify(a).slice(0, 120)}`);
     }
+    if (typeof a.baseUrl === 'string' && a.baseUrl) a.baseUrl = normalizeBase(a.baseUrl);
+    const plan = normalizePlan(a.plan);
+    if (plan) a.plan = plan;
+    else delete a.plan;
   }
   return [...list].sort((a, b) => a.priority - b.priority);
 }

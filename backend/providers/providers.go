@@ -17,6 +17,7 @@ import (
 
 	"github.com/mcptears/opencode-max/store"
 	"github.com/mcptears/opencode-max/types"
+	"github.com/mcptears/opencode-max/zen"
 )
 
 // DefaultPath resolves the providers file: PROVIDERS_FILE wins, otherwise
@@ -120,6 +121,7 @@ func DefaultProviders(upstreamBase string) []types.ProviderConfig {
 	if upstreamBase == "" {
 		upstreamBase = types.DefaultUpstreamBase
 	}
+	upstreamBase = zen.NormalizeBase(upstreamBase)
 	return []types.ProviderConfig{
 		{
 			ID:      "opencode-zen",
@@ -127,6 +129,7 @@ func DefaultProviders(upstreamBase string) []types.ProviderConfig {
 			BaseURL: upstreamBase,
 			Models:  []string{"*"},
 			Enabled: true,
+			Plan:    string(zen.PlanFromBase(upstreamBase)),
 		},
 	}
 }
@@ -246,7 +249,7 @@ func Normalize(m map[string]any) (types.ProviderConfig, bool) {
 	if _, err := url.ParseRequestURI(baseURL); err != nil {
 		return types.ProviderConfig{}, false
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	baseURL = zen.NormalizeBase(baseURL)
 
 	var models []string
 	if arr, ok := m["models"].([]any); ok {
@@ -276,6 +279,11 @@ func Normalize(m map[string]any) (types.ProviderConfig, bool) {
 		BaseURL: baseURL,
 		Models:  models,
 		Enabled: enabled,
+	}
+	if plan := zen.NormalizePlan(strField(m, "plan")); plan != "" {
+		p.Plan = string(plan)
+	} else if zen.IsGateway(baseURL) {
+		p.Plan = string(zen.PlanFromBase(baseURL))
 	}
 
 	switch strField(m, "protocol") {

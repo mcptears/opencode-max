@@ -247,6 +247,9 @@ export default function Accounts() {
                   <p style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <span className={`badge ${selProvider.enabled ? 'badge-active' : 'badge-invalid'}`}>{selProvider.enabled ? 'enabled' : 'disabled'}</span>
                     {selProvider.protocol && <span className="badge badge-neutral badge-no-dot">{selProvider.protocol}</span>}
+                    {selProvider.id === 'opencode-zen' && selProvider.plan && (
+                      <span className="badge badge-neutral badge-no-dot">{selProvider.plan}</span>
+                    )}
                     <span className="badge badge-neutral badge-no-dot">{selAccounts.length} account{selAccounts.length === 1 ? '' : 's'}</span>
                   </p>
                   {selProvider.models.length > 0 && (
@@ -288,7 +291,13 @@ export default function Accounts() {
                   <tbody>
                     {selAccounts.map((a) => (
                       <tr key={a.id}>
-                        <td><strong>{a.name}</strong><div style={{ color: 'var(--faint)', fontSize: 12 }}>{a.id}</div></td>
+                        <td>
+                          <strong>{a.name}</strong>
+                          <div style={{ color: 'var(--faint)', fontSize: 12 }}>{a.id}</div>
+                          {a.provider === 'opencode-zen' && a.plan && (
+                            <div style={{ color: 'var(--faint)', fontSize: 11 }}>plan: {a.plan}</div>
+                          )}
+                        </td>
                         <td>{a.priority}</td>
                         <td>
                           <span

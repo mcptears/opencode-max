@@ -2,13 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import fs from 'node:fs';
-import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import { qwenSignIn, sha256Hex } from '../qwenWeb.js';
 import { buildAdminRouter } from '../adminRoutes.js';
-import { projectRoot } from '../paths.js';
+import { PROVIDERS_FILE } from '../providers.js';
 import { AccountPool } from '../accountPool.js';
 import { IpRotator } from '../ipRotator.js';
 import { SessionManager } from '../sessionManager.js';
@@ -107,8 +106,8 @@ describe('POST /api/accounts/qwen-login', () => {
   let server: Server | null = null;
   const auth = { Authorization: 'Bearer ' + 'test' + '-token' };
   const accountsFile = process.env.ACCOUNTS_FILE!;
-  // providers.json has no env override — clean up anything the test writes.
-  const providersFile = path.join(projectRoot(), 'providers.json');
+  // Clean up anything the test writes to the isolated registry file.
+  const providersFile = PROVIDERS_FILE;
 
   beforeAll(async () => {
     saveSettings({ adminToken: 'test-token' });

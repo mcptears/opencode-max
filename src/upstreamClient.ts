@@ -56,6 +56,17 @@ import { compressToolResults } from './tokenSaver.js';
 import { trackUsage } from './usage.js';
 import type { AccountConfig } from './config.js';
 import { globMatch, type ProviderConfig } from './providers.js';
+import {
+  CONSOLE_BASE,
+  GO_BASE,
+  ZEN_USER_AGENT,
+  isGateway,
+  normalizeBase,
+  normalizePlan,
+  parseRetryAfter,
+  parseZenUsageFromText,
+  zenEndpoint,
+} from './zen.js';
 import { zaiChatCompletion, ZaiWebError } from './zaiWeb.js';
 import type { Alerter } from './alerts.js';
 import { qwenChatCompletion, resolveQwenModel, QwenWebError } from './qwenWeb.js';
@@ -109,12 +120,18 @@ export class UpstreamClient {
     private readonly alerter?: Alerter,
   ) {}
 
-  /** account.baseUrl > provider.baseUrl > global upstreamBase */
+  /** account.baseUrl > provider/base plan > global upstreamBase */
   resolveBaseUrl(account: AccountConfig): string {
-    if (account.baseUrl) return account.baseUrl.replace(/\/+$/, '');
+    if (account.baseUrl) return normalizeBase(account.baseUrl);
     const provider = this.getProviders().find((p) => p.id === account.provider);
-    if (provider?.baseUrl) return provider.baseUrl.replace(/\/+$/, '');
-    return getSettings().upstreamBase.replace(/\/+$/, '');
+    const plan = normalizePlan(account.plan) ?? (provider ? normalizePlan(provider.plan) : null);
+    if (plan === 'go') return GO_BASE;
+    if (provider?.baseUrl) {
+      const base = normalizeBase(provider.baseUrl);
+      if (plan === 'console' && isGateway(base)) return CONSOLE_BASE;
+      return base;
+    }
+    return normalizeBase(getSettings().upstreamBase);
   }
 
   /**
@@ -190,7 +207,7 @@ export class UpstreamClient {
     let queuedOnce = false;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const realAccount = this.pool.acquire(providerId);
+      const realAccount = this.pool.acquire(providerId, model);
       // Keyless providers (no accounts configured) forward anonymously.
       const account: AccountConfig | null =
         realAccount ??
@@ -241,17 +258,24 @@ export class UpstreamClient {
       // providers like Qwen/DeepSeek/Z.ai that don't enforce IP limits).
       const proxy = account.useProxy === false ? null : this.rotator.current();
       const base = this.resolveBaseUrl(account);
-      const url = `${base}${req.path}${req.query}`;
+      const gateway = isGateway(base);
+      const sessionId = gateway ? this.sessions.idFor(account.id) : this.sessions.id;
+      const url = `${zenEndpoint(base, req.path)}${req.query}`;
 
       const headers = sanitizeHeaders(req.headers);
       if (account.apiKey) headers['authorization'] = `Bearer ${account.apiKey}`;
-      headers['x-opencode-session'] = this.sessions.id;
+      if (gateway) {
+        // Identify as opencode-max. Never impersonate the official OpenCode
+        // client: free-tier models are reserved for it.
+        headers['user-agent'] = ZEN_USER_AGENT;
+        headers['x-opencode-session'] = sessionId;
+      }
       headers['accept'] = headers['accept'] ?? 'text/event-stream';
 
       let body: string | undefined;
       if (req.bodyText && req.method !== 'GET' && req.method !== 'HEAD') {
         try {
-          const parsed = sanitizePayload(JSON.parse(req.bodyText), this.sessions.id);
+          const parsed = sanitizePayload(JSON.parse(req.bodyText), sessionId);
           const s = getSettings();
           if (s.tokenSaver) {
             const savedChars = compressToolResults(parsed, s.tokenSaverMaxChars);
@@ -289,7 +313,7 @@ export class UpstreamClient {
 
       // Count the attempt against the account's quota: it reached upstream.
       // (Anonymous forwards have no account to count against.)
-      if (account.apiKey) this.quota?.record(account.id);
+      if (account.apiKey) this.quota?.recordModel(account.id, model);
 
       if (!RETRYABLE_STATUS.has(upstream.status)) {
         // Dead-key detection: 401, or a 403 that smells like a bad key (not quota).
@@ -324,18 +348,29 @@ export class UpstreamClient {
         this.pool.release(account.id);
         const result = this.toResult(upstream);
         // Sniff token usage out of the response (JSON body or final SSE chunk)
-        // without touching the bytes the client receives.
+        // without touching the bytes the client receives. Zen gateways also
+        // report cost/allowance metadata, which we persist for the dashboard.
         if (result.body) {
-          result.body = trackUsage(result.body, (u) => this.metrics?.logUsage(account.id, model, u.prompt, u.completion));
+          result.body = trackUsage(
+            result.body,
+            (u) => this.metrics?.logUsage(account.id, model, u.prompt, u.completion),
+            gateway
+              ? (text) => {
+                  const usage = parseZenUsageFromText(text);
+                  if (usage) this.quota?.recordZenUsage(account.id, model, usage);
+                }
+              : undefined,
+          );
         }
         return result;
       }
 
-      // 429 / quota / transient 5xx: park the token, rotate egress IP,
-      // mint a fresh session id, then retry transparently.
-      this.pool.markLimited(account.id);
+      // 429 / quota / transient 5xx: park the account (per model), rotate the
+      // egress IP, then retry transparently. The session id stays stable for
+      // the account — rotating it to dodge a limit would circumvent the plan.
+      const retryAfterMs = parseRetryAfter(upstream.headers.get('retry-after'));
+      this.pool.markLimited(account.id, retryAfterMs > 0 ? retryAfterMs : undefined, model);
       this.rotator.rotate();
-      this.sessions.rotate();
       this.metrics?.limited(account.id);
       this.metrics?.rotated(this.rotator.egressLabel());
       this.metrics?.retried();
@@ -346,7 +381,7 @@ export class UpstreamClient {
       }
       lastError = new Error(`upstream ${upstream.status} on account ${account.id}`);
       this.pool.release(account.id);
-      await sleep(backoff(attempt));
+      await sleep(retryAfterMs > 0 ? Math.min(retryAfterMs, 30_000) : backoff(attempt));
     }
 
     this.metrics?.logRequest(lastAccountId || 'none', 502, Date.now() - startedAt, model);

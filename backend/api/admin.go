@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mcptears/opencode-max/middleware"
+	"github.com/mcptears/opencode-max/zen"
 )
 
 // registerAdmin registers every /api/* route on the chi sub-router.
@@ -592,10 +593,26 @@ func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "API key is required"})
 		return
 	}
-	base := s.deps.Settings.Get().UpstreamBase
-	if v, _ := body["baseUrl"].(string); strings.TrimSpace(v) != "" {
-		base = strings.TrimRight(strings.TrimSpace(v), "/")
+
+	// Resolve the gateway + plan. Console (pay-as-you-go) and Go live on
+	// different roots; legacy /zen/v1 bases migrate automatically.
+	base := zen.NormalizeBase(s.deps.Settings.Get().UpstreamBase)
+	plan := zen.PlanFromBase(base)
+	if raw, _ := body["plan"].(string); zen.NormalizePlan(raw) != "" {
+		plan = zen.NormalizePlan(raw)
+		base = zen.BaseForPlan(plan)
 	}
+	if v, _ := body["baseUrl"].(string); strings.TrimSpace(v) != "" {
+		base = zen.NormalizeBase(v)
+		if _, hasPlan := body["plan"]; !hasPlan {
+			plan = zen.PlanFromBase(base)
+		}
+	}
+	gateway := zen.IsGateway(base)
+	if gateway {
+		base = zen.BaseForPlan(plan)
+	}
+
 	authHeader := "Bearer " + apiKey
 	withTimeout := func(ctx context.Context, url, method string, payload any) (*http.Response, error) {
 		tctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -610,45 +627,67 @@ func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Header.Set("Authorization", authHeader)
 		req.Header.Set("Content-Type", "application/json")
+		if gateway {
+			// Identify as opencode-max. Never impersonate the official
+			// OpenCode client: free-tier models are reserved for it.
+			req.Header.Set("User-Agent", zen.UserAgent)
+		}
 		return http.DefaultClient.Do(req)
 	}
 	fail := func(msg string) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": msg})
 	}
-	modelsRes, err := withTimeout(r.Context(), base+"/models", http.MethodGet, nil)
+	modelsURL := strings.TrimRight(base, "/") + "/models"
+	if gateway {
+		modelsURL = zen.Endpoint(base, "/models")
+	}
+	modelsRes, err := withTimeout(r.Context(), modelsURL, http.MethodGet, nil)
 	if err != nil {
 		fail("could not reach upstream — check your connection")
 		return
+	}
+	var catalog struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if modelsRes.StatusCode >= 200 && modelsRes.StatusCode < 300 {
+		_ = json.NewDecoder(modelsRes.Body).Decode(&catalog)
 	}
 	modelsRes.Body.Close()
 	if modelsRes.StatusCode == 401 || modelsRes.StatusCode == 403 {
 		fail("key rejected by upstream (401/403) — check the key")
 		return
 	}
-	model := "big-pickle"
-	if modelsRes.StatusCode >= 200 && modelsRes.StatusCode < 300 {
-		// Re-fetch to parse the catalog (body already closed; do a fresh GET).
-		if res2, err := withTimeout(r.Context(), base+"/models", http.MethodGet, nil); err == nil {
-			var catalog struct {
-				Data []struct {
-					ID string `json:"id"`
-				} `json:"data"`
-			}
-			if json.NewDecoder(res2.Body).Decode(&catalog) == nil {
-				for _, m := range catalog.Data {
-					if m.ID != "" && !strings.HasSuffix(m.ID, "-free") {
-						model = m.ID
-						break
-					}
-				}
-				if model == "big-pickle" && len(catalog.Data) > 0 && catalog.Data[0].ID != "" {
-					model = catalog.Data[0].ID
-				}
-			}
-			res2.Body.Close()
+
+	var ids []string
+	for _, m := range catalog.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
 		}
 	}
-	ping, err := withTimeout(r.Context(), base+"/chat/completions", http.MethodPost, map[string]any{
+	model := ""
+	switch {
+	case gateway && plan != zen.PlanGo:
+		model = zen.PickPaidModel(ids)
+		if model == "" {
+			fail("this key only exposes free-tier models, which OpenCode reserves for its own client — use a paid Console model or a Go plan")
+			return
+		}
+	case len(ids) > 0:
+		model = ids[0]
+	case gateway:
+		fail("could not read the model catalog — check the key and plan")
+		return
+	default:
+		model = "big-pickle"
+	}
+
+	pingURL := strings.TrimRight(base, "/") + "/chat/completions"
+	if gateway {
+		pingURL = zen.Endpoint(base, "/chat/completions")
+	}
+	ping, err := withTimeout(r.Context(), pingURL, http.MethodPost, map[string]any{
 		"model": model, "messages": []any{map[string]any{"role": "user", "content": "ping"}},
 		"max_tokens": 1, "stream": false,
 	})
@@ -665,6 +704,17 @@ func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
 			fail("key rejected by upstream — check the key")
 			return
 		}
+	}
+	if ping.StatusCode == 403 && gateway {
+		buf := make([]byte, 4096)
+		n, _ := ping.Body.Read(buf)
+		probe := strings.ToLower(string(buf[:n]))
+		if strings.Contains(probe, "free") || strings.Contains(probe, "opencode") {
+			fail("free-tier models are only available from within OpenCode — use a paid model or a Go plan")
+			return
+		}
+		fail("access denied by upstream (403) — check the key and plan")
+		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -1092,15 +1142,23 @@ func (s *Server) handlePresetOpenCodeZen(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	zen := ProviderConfig{
+	body := decodeBody(r)
+	base := zen.NormalizeBase(s.deps.Settings.Get().UpstreamBase)
+	plan := zen.PlanFromBase(base)
+	if raw, _ := body["plan"].(string); zen.NormalizePlan(raw) != "" {
+		plan = zen.NormalizePlan(raw)
+	}
+	base = zen.BaseForPlan(plan)
+	zenProvider := ProviderConfig{
 		ID: "opencode-zen", Name: "OpenCode Zen",
-		BaseURL: s.deps.Settings.Get().UpstreamBase,
+		BaseURL: base,
+		Plan:    string(plan),
 		Models:  []string{"*"}, Enabled: true,
 	}
-	providers = append(providers, zen)
+	providers = append(providers, zenProvider)
 	s.deps.Providers.Save(providers)
 	s.deps.Metrics.Record("settings", "opencode-zen provider restored")
-	writeJSON(w, 200, map[string]any{"ok": true, "provider": zen})
+	writeJSON(w, 200, map[string]any{"ok": true, "provider": zenProvider})
 }
 
 func (s *Server) handlePresetZai(w http.ResponseWriter, r *http.Request) {
@@ -1201,13 +1259,29 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	tctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(tctx, http.MethodGet, strings.TrimRight(p.BaseURL, "/")+"/models", nil)
+	base := p.BaseURL
+	switch zen.NormalizePlan(p.Plan) {
+	case zen.PlanGo:
+		base = zen.GoBase
+	case zen.PlanConsole:
+		if zen.IsGateway(base) {
+			base = zen.ConsoleBase
+		}
+	}
+	modelsURL := strings.TrimRight(base, "/") + "/models"
+	if zen.IsGateway(base) {
+		modelsURL = zen.Endpoint(base, "/models")
+	}
+	req, err := http.NewRequestWithContext(tctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()[:min(160, len(err.Error()))]})
 		return
 	}
 	if account != nil && account.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+account.APIKey)
+	}
+	if zen.IsGateway(base) {
+		req.Header.Set("User-Agent", zen.UserAgent)
 	}
 	rt := s.deps.Rotator.RoundTripperFor(s.deps.Rotator.Current(), s.deps.Rotator.CurrentFamily())
 	resp, err := (&http.Client{Transport: rt}).Do(req)

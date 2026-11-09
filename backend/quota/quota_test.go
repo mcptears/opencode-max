@@ -91,6 +91,23 @@ func TestIsOverAndNearQuota(t *testing.T) {
 	}
 }
 
+func TestZeroLimitDisablesEnforcement(t *testing.T) {
+	q := newTestTracker(t, 0)
+	for i := 0; i < 500; i++ {
+		q.Record("a")
+	}
+	if q.IsOverQuota("a", 0) {
+		t.Fatal("zero global limit must not mark accounts over quota")
+	}
+	if q.IsNearQuota("a", 0) {
+		t.Fatal("zero global limit must not mark accounts near quota")
+	}
+	// An explicit per-account budget still applies.
+	if !q.IsOverQuota("a", 10) {
+		t.Fatal("per-account override should still enforce")
+	}
+}
+
 func TestPrune(t *testing.T) {
 	q := newTestTracker(t, 100)
 	now := time.Now().UnixMilli()

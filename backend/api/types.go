@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/mcptears/opencode-max/zen"
 )
 
 // ---------------------------------------------------------------------------
@@ -37,6 +39,8 @@ type AccountConfig struct {
 	CooldownPeriod *int64 `json:"cooldownPeriod,omitempty"`
 	// Optional per-account upstream override.
 	BaseURL *string `json:"baseUrl,omitempty"`
+	// Zen gateway plan: "console" (pay-as-you-go) or "go".
+	Plan string `json:"plan,omitempty"`
 	// Optional per-account rolling 5h request budget.
 	QuotaLimit *int `json:"quotaLimit,omitempty"`
 }
@@ -47,6 +51,7 @@ type AccountStatus struct {
 	Name           string  `json:"name"`
 	Provider       string  `json:"provider"`
 	Priority       int     `json:"priority"`
+	Plan           string  `json:"plan,omitempty"`
 	UseProxy       *bool   `json:"useProxy,omitempty"`
 	ProxyMode      string  `json:"proxyMode,omitempty"` // effective: off | pool | single
 	ProxyURL       string  `json:"proxyUrl,omitempty"`  // redacted when mode is single, "" otherwise
@@ -84,6 +89,7 @@ type ProviderConfig struct {
 	ID       string              `json:"id"`
 	Name     string              `json:"name"`
 	BaseURL  string              `json:"baseUrl"`
+	Plan     string              `json:"plan,omitempty"` // console | go (Zen only)
 	Models   []string            `json:"models"`
 	Enabled  bool                `json:"enabled"`
 	Protocol string              `json:"protocol,omitempty"` // openai | qwen-web | deepseek-web | zai-web
@@ -387,7 +393,10 @@ func ValidateAccount(body map[string]any) (AccountConfig, error) {
 		v := int64(cp)
 		acct.CooldownPeriod = &v
 	}
-	acct.BaseURL = strPtr(str("baseUrl"))
+	acct.BaseURL = strPtr(zen.NormalizeBase(str("baseUrl")))
+	if plan := zen.NormalizePlan(str("plan")); plan != "" {
+		acct.Plan = string(plan)
+	}
 	if ql, ok := toFloat(body["quotaLimit"]); ok && ql > 0 {
 		v := int(ql)
 		acct.QuotaLimit = &v
@@ -408,7 +417,7 @@ func ValidateProviderInput(body map[string]any) (ProviderConfig, error) {
 	if ok, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-_]*$`, strings.ToLower(id)); !ok {
 		return ProviderConfig{}, errBad("id must be alphanumeric with dashes/underscores")
 	}
-	baseURL := strings.TrimRight(str("baseUrl"), "/")
+	baseURL := zen.NormalizeBase(str("baseUrl"))
 	if baseURL == "" {
 		return ProviderConfig{}, errBad("baseUrl is required")
 	}
@@ -435,6 +444,11 @@ func ValidateProviderInput(body map[string]any) (ProviderConfig, error) {
 		name = id
 	}
 	p := ProviderConfig{ID: id, Name: name, BaseURL: baseURL, Models: models, Enabled: enabled}
+	if plan := zen.NormalizePlan(str("plan")); plan != "" {
+		p.Plan = string(plan)
+	} else if zen.IsGateway(baseURL) {
+		p.Plan = string(zen.PlanFromBase(baseURL))
+	}
 	protocol, _ := body["protocol"].(string)
 	sub := func(key string) map[string]any {
 		m, _ := body[key].(map[string]any)

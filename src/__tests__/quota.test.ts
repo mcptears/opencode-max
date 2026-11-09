@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { QuotaTracker } from '../quota.js';
 import { getDb } from '../db.js';
 
@@ -19,6 +19,17 @@ describe('QuotaTracker', () => {
     q.record('quota-c');
     expect(q.isOverQuota('quota-c')).toBe(false);
     expect(q.isNearQuota('quota-c')).toBe(false);
+  });
+
+  it('treats a non-positive limit as disabled', () => {
+    const q = new QuotaTracker();
+    for (let i = 0; i < 10; i++) q.record('quota-zero');
+    vi.spyOn(q, 'limit').mockReturnValue(0);
+    expect(q.isOverQuota('quota-zero')).toBe(false);
+    expect(q.isNearQuota('quota-zero')).toBe(false);
+    // An explicit per-account budget still applies.
+    expect(q.isOverQuota('quota-zero', 5)).toBe(true);
+    vi.restoreAllMocks();
   });
 
   it('prunes events older than retention', () => {

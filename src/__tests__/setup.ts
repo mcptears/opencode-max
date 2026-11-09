@@ -12,3 +12,5 @@ process.env.SETTINGS_FILE = path.join(dir, 'settings.json');
 // Isolate account/proxy file writes too (CONFIG reads these at import).
 process.env.ACCOUNTS_FILE = path.join(dir, 'accounts.json');
 process.env.PROXIES_FILE = path.join(dir, 'proxies.json');
+// Provider registry writes must not race between parallel test files.
+process.env.PROVIDERS_FILE = path.join(dir, 'providers.json');

@@ -20,9 +20,25 @@ export function getDb(): DatabaseSync {
   db.exec(`CREATE TABLE IF NOT EXISTS usage_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id TEXT NOT NULL,
-    ts INTEGER NOT NULL
+    ts INTEGER NOT NULL,
+    model TEXT
   );`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_usage_account_ts ON usage_events(account_id, ts);');
+  try {
+    db.exec('ALTER TABLE usage_events ADD COLUMN model TEXT');
+  } catch {
+    /* existing database already has the column */
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS zen_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    model TEXT,
+    allowance_usd REAL NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    billing_source TEXT
+  );`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_zen_usage_account_ts ON zen_usage(account_id, ts);');
   db.exec(`CREATE TABLE IF NOT EXISTS metric_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER NOT NULL,

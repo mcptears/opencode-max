@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/mcptears/opencode-max/types"
+	"github.com/mcptears/opencode-max/zen"
 )
 
 func envOr(key, fallback string) string {
@@ -48,7 +49,7 @@ func Load() types.RuntimeConfig {
 	}
 	return types.RuntimeConfig{
 		Port:              envInt("PORT", 8080),
-		UpstreamBase:      strings.TrimRight(envOr("UPSTREAM_BASE", types.DefaultUpstreamBase), "/"),
+		UpstreamBase:      zen.NormalizeBase(envOr("UPSTREAM_BASE", types.DefaultUpstreamBase)),
 		AccountsFile:      envOr("ACCOUNTS_FILE", filepath.Join(cwd, "accounts.json")),
 		ProxiesFile:       envOr("PROXIES_FILE", filepath.Join(cwd, "proxies.json")),
 		MaxRetries:        envInt("MAX_RETRIES", 5),
@@ -104,6 +105,12 @@ func LoadAccounts(path string) ([]types.AccountConfig, error) {
 		var a types.AccountConfig
 		if err := json.NewDecoder(bytes.NewReader(mustMarshal(m))).Decode(&a); err != nil {
 			return nil, fmt.Errorf("invalid account entry at index %d: %w", i, err)
+		}
+		a.BaseURL = zen.NormalizeBase(a.BaseURL)
+		if plan := zen.NormalizePlan(a.Plan); plan != "" {
+			a.Plan = string(plan)
+		} else {
+			a.Plan = ""
 		}
 		accounts = append(accounts, a)
 	}

@@ -18,7 +18,7 @@ const REDACTED = '••••••••';
 
 const FIELDS: FieldDef[] = [
   { key: 'port', label: 'Server port', desc: '0 = PORT env / default 8080. Takes effect after restart.', kind: 'number', group: 'Server' },
-  { key: 'upstreamBase', label: 'Upstream base URL', desc: 'OpenCode Zen base URL. Empty = default.', kind: 'text', group: 'Server', placeholder: 'https://opencode.ai/zen/v1' },
+  { key: 'upstreamBase', label: 'Upstream base URL', desc: 'OpenCode Zen gateway root. Empty = default. Legacy /zen/v1 migrates automatically.', kind: 'text', group: 'Server', placeholder: 'https://opencode.ai/inference' },
   { key: 'adminToken', label: 'Admin token', desc: 'Guards mutating admin endpoints. Empty = open on loopback.', kind: 'secret', group: 'Server', placeholder: 'Leave as-is to keep current', clearable: true },
   { key: 'alertWebhookUrl', label: 'Alert webhook URL', desc: 'POSTed on dead keys / pool exhaustion. Empty keeps current.', kind: 'secret', group: 'Server', placeholder: 'https://…' },
   { key: 'routingStrategy', label: 'Routing strategy', desc: 'Priority: highest-priority account first. Latency: fastest first.', kind: 'select', group: 'Routing', options: [{ value: '', label: 'Default (priority)' }, { value: 'priority', label: 'Priority' }, { value: 'latency', label: 'Latency' }] },

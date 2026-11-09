@@ -106,8 +106,11 @@ func TestNormalize(t *testing.T) {
 	if !ok {
 		t.Fatal("Normalize rejected a valid provider")
 	}
-	if p.BaseURL != "https://opencode.ai/zen/v1" {
-		t.Errorf("trailing slash not trimmed: %q", p.BaseURL)
+	if p.BaseURL != "https://opencode.ai/inference" {
+		t.Errorf("legacy zen base not migrated: %q", p.BaseURL)
+	}
+	if p.Plan != "console" {
+		t.Errorf("plan = %q, want console", p.Plan)
 	}
 	if p.Protocol != "" || p.EffectiveProtocol() != types.ProtocolOpenAI {
 		t.Errorf("protocol = %q, want empty/openai", p.Protocol)

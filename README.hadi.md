@@ -53,7 +53,7 @@ All backend configuration is via environment variables:
 | Variable             | Default                        | Description                              |
 |----------------------|--------------------------------|------------------------------------------|
 | `PORT`               | `8080`                         | HTTP listen port                         |
-| `UPSTREAM_BASE`      | `https://opencode.ai/zen/v1`   | Default OpenAI-compatible upstream       |
+| `UPSTREAM_BASE`      | `https://opencode.ai/inference` | Default OpenAI-compatible upstream      |
 | `ACCOUNTS_FILE`      | `./accounts.json`              | Account pool file                        |
 | `PROXIES_FILE`       | `./proxies.json`               | Proxy pool file (missing = direct egress)|
 | `PROXY_LIST`         | —                              | Comma-separated proxies (overrides file) |

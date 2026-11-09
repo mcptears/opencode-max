@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import fs from 'node:fs';
-import path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { AccountPool } from '../accountPool.js';
@@ -11,7 +10,7 @@ import { Metrics } from '../metrics.js';
 import { SessionManager } from '../sessionManager.js';
 import { ScraperJob } from '../scraperJob.js';
 import { saveSettings } from '../settings.js';
-import { projectRoot } from '../paths.js';
+import { PROVIDERS_FILE } from '../providers.js';
 import { buildAdminRouter } from '../adminRoutes.js';
 
 describe('POST /api/accounts auto-creates the qwen provider', () => {
@@ -19,8 +18,8 @@ describe('POST /api/accounts auto-creates the qwen provider', () => {
   let server: Server | null = null;
   const auth = { Authorization: 'Bearer ' + 'test' + '-token' };
   const accountsFile = process.env.ACCOUNTS_FILE!;
-  // providers.json has no env override — clean up anything the test writes.
-  const providersFile = path.join(projectRoot(), 'providers.json');
+  // Clean up anything the test writes to the isolated registry file.
+  const providersFile = PROVIDERS_FILE;
 
   beforeAll(async () => {
     saveSettings({ adminToken: 'test-token' });

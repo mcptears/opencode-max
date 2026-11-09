@@ -17,7 +17,10 @@ import (
 	"github.com/mcptears/opencode-max/providers/qwen"
 	"github.com/mcptears/opencode-max/providers/zai"
 	"github.com/mcptears/opencode-max/proxy"
+	"github.com/mcptears/opencode-max/quota"
+	"github.com/mcptears/opencode-max/session"
 	"github.com/mcptears/opencode-max/types"
+	"github.com/mcptears/opencode-max/zen"
 )
 
 // ---------------------------------------------------------------------------
@@ -40,6 +43,10 @@ type Upstream struct {
 	}
 	DefaultCooldown time.Duration
 	MaxRetries      int
+	// Sessions supplies the stable x-opencode-session id per account.
+	Sessions *session.Manager
+	// Quota records request counts and Zen allowance/cost metadata.
+	Quota *quota.Tracker
 	// ZaiTokenPool supplies auto-harvested device tokens for Z.ai captcha.
 	ZaiTokenPool zai.TokenPool
 	// OnZaiPoolEmpty, when set, is called (once per empty-pool hit) when a
@@ -57,6 +64,33 @@ type openAIRequest struct {
 	Model    string          `json:"model"`
 	Messages []openAIMessage `json:"messages"`
 	Stream   *bool           `json:"stream"`
+}
+
+// resolveBase picks the upstream gateway for an account. An explicit
+// account.baseUrl wins; otherwise the account plan, provider plan and finally
+// the provider base URL decide. Legacy /zen/v1 prefixes are migrated.
+func resolveBase(ac *types.AccountConfig, provider *types.ProviderConfig) string {
+	if ac != nil && ac.BaseURL != "" {
+		return zen.NormalizeBase(ac.BaseURL)
+	}
+	plan := zen.Plan("")
+	if ac != nil {
+		plan = zen.NormalizePlan(ac.Plan)
+	}
+	if plan == "" && provider != nil {
+		plan = zen.NormalizePlan(provider.Plan)
+	}
+	if plan == zen.PlanGo {
+		return zen.GoBase
+	}
+	if provider != nil && provider.BaseURL != "" {
+		base := zen.NormalizeBase(provider.BaseURL)
+		if plan == zen.PlanConsole && zen.IsGateway(base) {
+			return zen.ConsoleBase
+		}
+		return base
+	}
+	return zen.ConsoleBase
 }
 
 func (u *Upstream) Forward(req api.ForwardRequest) (api.ForwardResult, error) {
@@ -78,64 +112,161 @@ func (u *Upstream) Forward(req api.ForwardRequest) (api.ForwardResult, error) {
 		return api.ForwardResult{Status: 404}, fmt.Errorf("no provider for model %q", parsed.Model)
 	}
 
-	// Acquire account.
-	ac := u.Pool.Acquire(provider.ID)
-	if ac == nil {
-		return api.ForwardResult{Status: 502}, &api.ProviderExhaustedError{Msg: fmt.Sprintf("no accounts available for provider %q", provider.ID)}
-	}
-	defer u.Pool.Release(ac.ID)
-	u.Metrics.Hit(ac.ID)
-
 	protocol := string(provider.Protocol)
 	if protocol == "" {
 		protocol = "openai"
 	}
-
 	stream := parsed.Stream == nil || *parsed.Stream
-	start := time.Now()
 
-	var body io.ReadCloser
-	var err error
-	switch protocol {
-	case "qwen-web":
-		body, err = u.forwardQwen(ctx, ac, provider, parsed, stream)
-	case "deepseek-web":
-		body, err = u.forwardDeepSeek(ctx, ac, provider, parsed, stream)
-	case "zai-web":
-		body, err = u.forwardZai(ctx, ac, provider, parsed, stream)
-	default:
-		return u.forwardOpenAI(ctx, ac, provider, req)
+	maxAttempts := u.MaxRetries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	}
+	var lastErr error
+	lastStatus := 502
 
-	latency := time.Since(start)
-	if err != nil {
-		u.handleError(ac, err)
-		status := 502
-		if qe, ok := err.(interface{ StatusCode() int }); ok {
-			status = qe.StatusCode()
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		ac := u.Pool.AcquireForModel(provider.ID, parsed.Model)
+		if ac == nil {
+			msg := fmt.Sprintf("no accounts available for provider %q", provider.ID)
+			if lastErr != nil {
+				msg = fmt.Sprintf("%s: %v", msg, lastErr)
+			}
+			return api.ForwardResult{Status: 502}, &api.ProviderExhaustedError{Msg: msg}
 		}
-		return api.ForwardResult{Status: status}, err
-	}
-	u.Metrics.Ok()
-	u.Metrics.LogRequest(ac.ID, 200, latency.Milliseconds(), parsed.Model)
-	u.Pool.RecordLatency(ac.ID, latency.Milliseconds())
+		u.Metrics.Hit(ac.ID)
+		start := time.Now()
 
-	ct := "application/json"
-	if stream {
-		ct = "text/event-stream"
+		// Native web protocols have their own clients and no transparent retry.
+		if protocol != "openai" {
+			var body io.ReadCloser
+			var err error
+			switch protocol {
+			case "qwen-web":
+				body, err = u.forwardQwen(ctx, ac, provider, parsed, stream)
+			case "deepseek-web":
+				body, err = u.forwardDeepSeek(ctx, ac, provider, parsed, stream)
+			case "zai-web":
+				body, err = u.forwardZai(ctx, ac, provider, parsed, stream)
+			}
+			u.Pool.Release(ac.ID)
+			latency := time.Since(start)
+			if err != nil {
+				u.handleError(ac, err, parsed.Model)
+				status := 502
+				if qe, ok := err.(interface{ StatusCode() int }); ok {
+					status = qe.StatusCode()
+				}
+				return api.ForwardResult{Status: status}, err
+			}
+			u.Metrics.Ok()
+			u.Metrics.LogRequest(ac.ID, 200, latency.Milliseconds(), parsed.Model)
+			u.Pool.RecordLatency(ac.ID, latency.Milliseconds())
+			ct := "application/json"
+			if stream {
+				ct = "text/event-stream"
+			}
+			return api.ForwardResult{
+				Status:  200,
+				Headers: map[string]string{"content-type": ct},
+				Body:    body,
+			}, nil
+		}
+
+		// OpenAI-compatible passthrough.
+		result, err := u.forwardOpenAI(ctx, ac, provider, req, parsed.Model)
+		latency := time.Since(start)
+		if err != nil {
+			u.Pool.Release(ac.ID)
+			lastErr = err
+			lastStatus = 502
+			if attempt+1 < maxAttempts && !sleepCtx(ctx, backoffDelay(attempt, u.DefaultCooldown)) {
+				return api.ForwardResult{Status: 499}, ctx.Err()
+			}
+			continue
+		}
+		if u.Quota != nil && ac.APIKey != "" {
+			u.Quota.RecordModel(ac.ID, parsed.Model)
+		}
+
+		// Success: pass the body through, sniffing Zen cost/allowance on the
+		// way (JSON or final SSE chunk).
+		if result.Status >= 200 && result.Status < 300 {
+			u.Metrics.Ok()
+			u.Metrics.LogRequest(ac.ID, result.Status, latency.Milliseconds(), parsed.Model)
+			u.Pool.RecordLatency(ac.ID, latency.Milliseconds())
+			u.Pool.Release(ac.ID)
+			if u.Quota != nil && result.Body != nil && zen.IsGateway(resolveBase(ac, provider)) {
+				result.Body = &usageSniffReader{
+					rc:        result.Body,
+					accountID: ac.ID,
+					model:     parsed.Model,
+					quota:     u.Quota,
+				}
+			}
+			return result, nil
+		}
+
+		probe := readLimited(result.Body, 64*1024)
+
+		// Dead key: 401, or a 403 that smells like a bad credential (not quota
+		// or a free-tier restriction).
+		if result.Status == 401 || (result.Status == 403 && looksLikeInvalidKey(probe)) {
+			u.Pool.MarkInvalid(ac.ID)
+			u.Pool.Release(ac.ID)
+			lastErr = fmt.Errorf("upstream %d: %s", result.Status, snippet(probe))
+			lastStatus = result.Status
+			continue
+		}
+
+		if isRetryableStatus(result.Status) {
+			cooldown := retryCooldown(result.Headers, u.DefaultCooldown)
+			u.Pool.MarkLimitedModel(ac.ID, parsed.Model, cooldown)
+			u.Metrics.Limited(ac.ID)
+			u.Metrics.Retried()
+			u.Pool.Release(ac.ID)
+			lastErr = fmt.Errorf("upstream %d: %s", result.Status, snippet(probe))
+			lastStatus = result.Status
+			if attempt+1 >= maxAttempts {
+				break
+			}
+			// Retry-After (bounded) is honoured; otherwise exponential backoff.
+			wait := backoffDelay(attempt, u.DefaultCooldown)
+			if ra := zen.ParseRetryAfter(result.Headers["retry-after"], time.Now()); ra > 0 {
+				wait = ra
+				if wait > 30*time.Second {
+					wait = 30 * time.Second
+				}
+			}
+			if !sleepCtx(ctx, wait) {
+				return api.ForwardResult{Status: 499}, ctx.Err()
+			}
+			continue
+		}
+
+		// Other 4xx (bad request, unsupported model, free-tier 403…): return
+		// the upstream error to the client instead of pretending it worked.
+		u.Pool.Release(ac.ID)
+		u.Metrics.LogRequest(ac.ID, result.Status, latency.Milliseconds(), parsed.Model)
+		return api.ForwardResult{
+			Status:  result.Status,
+			Headers: result.Headers,
+			Body:    io.NopCloser(bytes.NewReader(probe)),
+		}, nil
 	}
-	return api.ForwardResult{
-		Status:  200,
-		Headers: map[string]string{"content-type": ct},
-		Body:    body,
-	}, nil
+
+	u.Metrics.LogRequest("none", lastStatus, 0, parsed.Model)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("upstream request failed")
+	}
+	return api.ForwardResult{Status: lastStatus}, lastErr
 }
 
-func (u *Upstream) handleError(ac *types.AccountConfig, err error) {
-	msg := err.Error()
+func (u *Upstream) handleError(ac *types.AccountConfig, err error, model string) {
+	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "429") || strings.Contains(msg, "rate") || strings.Contains(msg, "quota"):
-		u.Pool.MarkLimited(ac.ID, u.DefaultCooldown)
+		u.Pool.MarkLimitedModel(ac.ID, model, u.DefaultCooldown)
 		u.Metrics.Limited(ac.ID)
 	case strings.Contains(msg, "401") || strings.Contains(msg, "403") || strings.Contains(msg, "rejected"):
 		u.Pool.MarkInvalid(ac.ID)
@@ -342,21 +473,9 @@ func (u *Upstream) forwardZai(ctx context.Context, ac *types.AccountConfig, prov
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
-// zenUserAgent returns the official opencode client User-Agent when the
-// base URL is opencode.ai's Zen endpoint, else "".
-func zenUserAgent(base string) string {
-	if strings.Contains(base, "opencode.ai/zen") {
-		return "opencode/1.18.31"
-	}
-	return ""
-}
-
-func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req api.ForwardRequest) (api.ForwardResult, error) {
-	base := provider.BaseURL
-	if ac.BaseURL != "" {
-		base = ac.BaseURL
-	}
-	url := strings.TrimRight(base, "/") + req.Path
+func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, provider *types.ProviderConfig, req api.ForwardRequest, model string) (api.ForwardResult, error) {
+	base := resolveBase(ac, provider)
+	url := zen.Endpoint(base, req.Path)
 	if req.Query != "" {
 		url += req.Query
 	}
@@ -375,13 +494,14 @@ func (u *Upstream) forwardOpenAI(ctx context.Context, ac *types.AccountConfig, p
 	if ac.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+ac.APIKey)
 	}
-	// opencode.ai's Zen endpoint rejects requests that don't come from the
-	// official client ("usable only inside opencode"). Identify as the
-	// official opencode client, same as the 9router approach. This only
-	// applies when the user provides their own real API key — no free-tier
-	// access is granted or spoofed here.
-	if ua := zenUserAgent(base); ua != "" {
-		httpReq.Header.Set("User-Agent", ua)
+	if zen.IsGateway(base) {
+		// Identify as opencode-max. Never impersonate the official OpenCode
+		// client: free-tier models are reserved for it and other clients must
+		// use paid/Go models instead.
+		httpReq.Header.Set("User-Agent", zen.UserAgent)
+		if u.Sessions != nil {
+			httpReq.Header.Set("x-opencode-session", u.Sessions.IDFor(ac.ID))
+		}
 	}
 
 	// Proxy or direct, per the account's proxy mode:
@@ -431,4 +551,120 @@ func (u *Upstream) clientFor(ac *types.AccountConfig) *http.Client {
 // matchProvider mirrors providers.MatchProvider.
 func matchProvider(provs []types.ProviderConfig, model string) *types.ProviderConfig {
 	return providers.MatchProvider(provs, model)
+}
+
+// ---------------------------------------------------------------------------
+// Retry / error helpers
+// ---------------------------------------------------------------------------
+
+func isRetryableStatus(status int) bool {
+	switch status {
+	case 408, 425, 429, 500, 502, 503, 504:
+		return true
+	}
+	return false
+}
+
+func looksLikeInvalidKey(body []byte) bool {
+	s := strings.ToLower(string(body))
+	invalid := strings.Contains(s, "invalid") || strings.Contains(s, "unauthorized") ||
+		strings.Contains(s, "api key") || strings.Contains(s, "api_key") || strings.Contains(s, "bad credentials")
+	quota := strings.Contains(s, "quota") || strings.Contains(s, "rate limit") || strings.Contains(s, "too many")
+	return invalid && !quota
+}
+
+func retryCooldown(headers map[string]string, fallback time.Duration) time.Duration {
+	if ra := zen.ParseRetryAfter(headers["retry-after"], time.Now()); ra > 0 {
+		return ra
+	}
+	return fallback
+}
+
+func backoffDelay(attempt int, fallback time.Duration) time.Duration {
+	base := 500 * time.Millisecond
+	if fallback > 0 && fallback < base {
+		base = fallback
+	}
+	max := 30 * time.Second
+	d := base
+	for i := 0; i < attempt; i++ {
+		d *= 2
+		if d >= max {
+			return max
+		}
+	}
+	if d > max {
+		return max
+	}
+	return d
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+func readLimited(r io.ReadCloser, max int64) []byte {
+	if r == nil {
+		return nil
+	}
+	defer r.Close()
+	b, _ := io.ReadAll(io.LimitReader(r, max))
+	return b
+}
+
+func snippet(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	return s
+}
+
+// usageSniffReader passes response bytes through unchanged and records Zen
+// cost/allowance metadata once the body ends (JSON or final SSE chunk).
+type usageSniffReader struct {
+	rc        io.ReadCloser
+	accountID string
+	model     string
+	quota     *quota.Tracker
+	buf       bytes.Buffer
+	done      bool
+}
+
+const maxUsageSniff = 2 * 1024 * 1024
+
+func (r *usageSniffReader) Read(p []byte) (int, error) {
+	n, err := r.rc.Read(p)
+	if n > 0 && !r.done && r.buf.Len() < maxUsageSniff {
+		_, _ = r.buf.Write(p[:n])
+	}
+	if err == io.EOF {
+		r.flush()
+	}
+	return n, err
+}
+
+func (r *usageSniffReader) Close() error {
+	r.flush()
+	return r.rc.Close()
+}
+
+func (r *usageSniffReader) flush() {
+	if r.done {
+		return
+	}
+	r.done = true
+	if u, ok := zen.ParseUsageFromText(r.buf.String()); ok {
+		r.quota.RecordZenUsage(r.accountID, r.model, u)
+	}
 }

@@ -64,10 +64,13 @@ export function extractUsageFromText(text: string): TokenUsage | undefined {
 /**
  * Wrap an upstream body stream, passing bytes through unchanged and calling
  * onUsage once with the extracted token counts when the stream completes.
+ * onText (optional) receives the buffered body text so callers can also read
+ * provider-specific metadata such as Zen cost/allowance.
  */
 export function trackUsage(
   body: ReadableStream<Uint8Array> | null,
   onUsage: (usage: TokenUsage) => void,
+  onText?: (text: string) => void,
 ): ReadableStream<Uint8Array> | null {
   if (!body) return body;
   const decoder = new TextDecoder();
@@ -87,6 +90,13 @@ export function trackUsage(
     flush() {
       if (truncated) return;
       buffered += decoder.decode();
+      if (onText) {
+        try {
+          onText(buffered);
+        } catch {
+          /* metadata logging must never break the response */
+        }
+      }
       const usage = extractUsageFromText(buffered);
       if (usage) {
         try {

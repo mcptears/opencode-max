@@ -26,9 +26,20 @@ PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS usage_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id TEXT NOT NULL,
-  ts INTEGER NOT NULL
+  ts INTEGER NOT NULL,
+  model TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_usage_account_ts ON usage_events(account_id, ts);
+CREATE TABLE IF NOT EXISTS zen_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  account_id TEXT NOT NULL,
+  model TEXT,
+  allowance_usd REAL NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  billing_source TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_zen_usage_account_ts ON zen_usage(account_id, ts);
 CREATE TABLE IF NOT EXISTS metric_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts INTEGER NOT NULL,
@@ -74,6 +85,8 @@ func Open(dataDir string) (*sql.DB, error) {
 		_ = database.Close()
 		return nil, err
 	}
+	// Existing databases predate the per-model usage column.
+	_, _ = database.Exec(`ALTER TABLE usage_events ADD COLUMN model TEXT`)
 	return database, nil
 }
 
@@ -89,6 +102,8 @@ func OpenMemory() (*sql.DB, error) {
 		_ = database.Close()
 		return nil, err
 	}
+	// Existing databases predate the per-model usage column.
+	_, _ = database.Exec(`ALTER TABLE usage_events ADD COLUMN model TEXT`)
 	return database, nil
 }
 

@@ -6,7 +6,7 @@ const PRESETS = [
   { id: 'qwen', label: 'Qwen', desc: 'chat.qwen.ai web API — sign in with your Qwen account.' },
   { id: 'deepseek', label: 'DeepSeek', desc: 'chat.deepseek.com web API — email + password sign-in.' },
   { id: 'zai', label: 'Z.ai', desc: 'chat.z.ai web API — JWT + harvested device tokens.' },
-  { id: 'opencode-zen', label: 'OpenCode Zen', desc: 'opencode.ai/zen — API key, IP rotation pool.' },
+  { id: 'opencode-zen', label: 'OpenCode Zen', desc: 'opencode.ai/inference — Console (pay-as-you-go) or Go plan, API key pool.' },
 ];
 
 const PROVIDER_ICON: Record<string, string> = {

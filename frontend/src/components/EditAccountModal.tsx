@@ -14,6 +14,7 @@ export default function EditAccountModal({ account, onClose, onDone }: {
   const [proxyUrl, setProxyUrl] = useState('');
   const [cooldownMs, setCooldownMs] = useState(account.cooldownPeriod ?? 0);
   const [baseUrl, setBaseUrl] = useState(account.baseUrl ?? '');
+  const [plan, setPlan] = useState<'console' | 'go'>(account.plan ?? 'console');
   const [quotaLimit, setQuotaLimit] = useState(account.quotaLimit ?? 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -42,6 +43,7 @@ export default function EditAccountModal({ account, onClose, onDone }: {
         proxyMode,
         cooldownPeriod: cooldownMs > 0 ? cooldownMs : undefined,
         baseUrl: baseUrl.trim() || undefined,
+        ...(account.provider === 'opencode-zen' ? { plan } : {}),
         quotaLimit: quotaLimit > 0 ? quotaLimit : undefined,
       };
       if (proxyMode === 'single' && proxyUrl) body.proxyUrl = proxyUrl;
@@ -78,6 +80,16 @@ export default function EditAccountModal({ account, onClose, onDone }: {
             <span>Base URL override</span>
             <input className="input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Leave empty for the provider default" />
           </label>
+          {account.provider === 'opencode-zen' && (
+            <label className="field">
+              <span>Plan</span>
+              <select className="input" value={plan} onChange={(e) => setPlan(e.target.value as 'console' | 'go')}>
+                <option value="console">Console — pay-as-you-go / balance</option>
+                <option value="go">OpenCode Go</option>
+              </select>
+              <small>Console and Go use different gateways. Free-tier models are reserved for the official OpenCode client.</small>
+            </label>
+          )}
           <label className="field">
             <span>Cooldown after rate limit (ms)</span>
             <input className="input" type="number" min={0} value={cooldownMs} onChange={(e) => setCooldownMs(Number(e.target.value) || 0)} />
@@ -86,7 +98,7 @@ export default function EditAccountModal({ account, onClose, onDone }: {
           <label className="field">
             <span>5h request budget</span>
             <input className="input" type="number" min={0} value={quotaLimit} onChange={(e) => setQuotaLimit(Number(e.target.value) || 0)} />
-            <small>Max requests in a rolling 5h window. 0 = unlimited.</small>
+            <small>Max requests in a rolling 5h window. 0 = use the global limit.</small>
           </label>
           <div className="field">
             <span>Proxy</span>

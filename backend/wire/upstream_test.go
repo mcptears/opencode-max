@@ -7,20 +7,27 @@ import (
 
 	"github.com/mcptears/opencode-max/proxy"
 	"github.com/mcptears/opencode-max/types"
+	"github.com/mcptears/opencode-max/zen"
 )
 
-func TestZenUserAgent(t *testing.T) {
-	if got := zenUserAgent("https://opencode.ai/zen/v1"); got != "opencode/1.18.31" {
-		t.Fatalf("zen base: got %q", got)
+// resolveBase picks the Console/Go gateway from the account/provider plan and
+// migrates legacy /zen/v1 prefixes.
+func TestResolveBase(t *testing.T) {
+	console := &types.ProviderConfig{ID: "opencode-zen", BaseURL: zen.LegacyConsoleBase}
+	if got := resolveBase(nil, console); got != zen.ConsoleBase {
+		t.Fatalf("legacy console base: got %q, want %q", got, zen.ConsoleBase)
 	}
-	if got := zenUserAgent("https://opencode.ai/zen/go/v1"); got != "opencode/1.18.31" {
-		t.Fatalf("zen go base: got %q", got)
+	goProvider := &types.ProviderConfig{ID: "opencode-zen", BaseURL: zen.ConsoleBase, Plan: "go"}
+	if got := resolveBase(nil, goProvider); got != zen.GoBase {
+		t.Fatalf("go plan: got %q, want %q", got, zen.GoBase)
 	}
-	if got := zenUserAgent("https://api.openai.com/v1"); got != "" {
-		t.Fatalf("non-zen base: got %q, want empty", got)
+	acct := &types.AccountConfig{BaseURL: zen.LegacyGoBase}
+	if got := resolveBase(acct, console); got != zen.GoBase {
+		t.Fatalf("account override: got %q, want %q", got, zen.GoBase)
 	}
-	if got := zenUserAgent(""); got != "" {
-		t.Fatalf("empty base: got %q, want empty", got)
+	custom := &types.ProviderConfig{BaseURL: "https://api.openai.com/v1"}
+	if got := resolveBase(nil, custom); got != "https://api.openai.com/v1" {
+		t.Fatalf("non-zen base: got %q", got)
 	}
 }
 

@@ -17,7 +17,7 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 | 🔄 | **IP rotation** | Round-robin egress proxy pool — a real IP change per rotation |
 | 🩺 | **Dead-key detection** | `401`/invalid keys parked instantly, one-click reset in dashboard |
 | 💓 | **Proxy health checks** | Dead proxies auto-skipped until they recover |
-| 🌐 | **IPv4/IPv6 rotation** | Alternates families on dual-stack hosts — separate Zen buckets |
+| 🌐 | **IPv4/IPv6 selection** | Pins or alternates egress family on dual-stack hosts |
 | 📊 | **Quota tracking** | Per-account rolling 5h window in SQLite; steers *before* the 429 |
 | 📈 | **Metrics history** | Request log + event feed persisted, 24h traffic chart |
 | ✂️ | **Token saver** | Compresses bloated `tool_result` payloads (saves ~20–40% tokens) |
@@ -43,11 +43,11 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 ## ⚙️ How it works
 
 ```
-[OpenCode client] ──HTTP──> [opencode-max :8080] ──HTTPS (+proxy)──> https://opencode.ai/zen/v1
+[OpenCode client] ──HTTP──> [opencode-max :8080] ──HTTPS (+proxy)──> https://opencode.ai/inference
                               │
                               ├─ accounts.json  → priority token pool (P1 → P2 → …)
                               ├─ proxies.json   → round-robin egress proxy pool
-                              └─ ses_*          → session id, rotated on every 429
+                              └─ ses_*          → stable session id per account
 ```
 
 **Every outgoing request:**
@@ -60,12 +60,15 @@ A unified proxy wrapper for **OpenCode Zen** that combines **🔄 IP rotation** 
 
 | Step | Action |
 |------|--------|
-| 1️⃣ | Token parked for its `cooldownPeriod` (auto-reactivates) |
-| 2️⃣ | Egress IP rotated to the next proxy |
-| 3️⃣ | Fresh `ses_*` session id minted |
+| 1️⃣ | Token parked for its `cooldownPeriod` (or the upstream `Retry-After`), per model |
+| 2️⃣ | Egress IP rotates to the next proxy (when a pool is configured) |
+| 3️⃣ | Stable per-account `ses_*` session id is reused — never rotated to dodge a limit |
 | 4️⃣ | Transparent retry with exponential backoff + jitter |
 
-> Zen keys its rate-limit bucket on the **raw egress IP** — so a genuine egress change, not header spoofing, is what resets the bucket.
+> Free-tier chat models are reserved for the official OpenCode client. Other
+> clients receive HTTP 403 for those models even with a Console key — use a
+> paid model or an OpenCode Go plan. opencode-max identifies itself as
+> `opencode-max/1.0` and never impersonates the official client.
 
 ## 🩺 Dead-key detection
 
@@ -75,9 +78,9 @@ A `401`, or a `403` whose body looks like an invalid key (rather than quota), pa
 
 Proxies are probed periodically (default every 60s, `PROXY_HEALTH_INTERVAL_MS`) through their own dispatcher. A proxy that fails twice in a row is marked **down** and skipped until it recovers; transitions are logged as events. Toggle with `PROXY_HEALTH_CHECK=0` or the dashboard checkbox. Credentials are redacted everywhere.
 
-## 🌐 IPv4/IPv6 family rotation
+## 🌐 IPv4/IPv6 family selection
 
-Zen treats IPv4 and IPv6 as **separate** rate-limit buckets. With no proxies configured, opencode-max detects dual-stack at startup and alternates the connection family on every rotation in `auto` mode — effectively doubling the quota. Pin with `EGRESS_FAMILY=4|6|auto`.
+With no proxies configured, opencode-max detects dual-stack at startup and can alternate the connection family in `auto` mode. Pin with `EGRESS_FAMILY=4|6|auto`. This is an egress-selection convenience, not a way to exceed plan limits.
 
 ## 📊 Per-account quota tracking
 
@@ -344,7 +347,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `8080` | Listen port |
-| `UPSTREAM_BASE` | `https://opencode.ai/zen/v1` | Zen gateway base URL |
+| `UPSTREAM_BASE` | `https://opencode.ai/inference` | Zen gateway root (`/go` for Go plans) |
 | `ACCOUNTS_FILE` | `./accounts.json` | Account pool file (**never commit**) |
 | `PROXIES_FILE` | `./proxies.json` | Egress proxy pool (**never commit**) |
 | `PROXY_LIST` | — | Comma-separated proxies; overrides the file |
@@ -377,7 +380,7 @@ pm2 start ecosystem.config.cjs && pm2 startup     # pm2, any OS
 | `LOG_KEEP` | `3` | Rotated log generations to keep |
 | `SHUTDOWN_DRAIN_MS` | `30000` | Max wait for in-flight requests on SIGTERM/SIGINT |
 
-`accounts.json` — array of `{ id, name, provider, apiKey, priority, cooldownPeriod?, baseUrl? }`.
+`accounts.json` — array of `{ id, name, provider, apiKey, priority, plan?, cooldownPeriod?, baseUrl? }`. `plan` is `console` (pay-as-you-go/balance) or `go`; legacy `/zen/v1` bases migrate automatically.
 `proxies.json` — array (or `{ "proxies": [...] }`) of `http://user:pass@host:port` URLs.
 
 ## 🔌 Endpoints

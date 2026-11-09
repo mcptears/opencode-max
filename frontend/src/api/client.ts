@@ -37,6 +37,7 @@ export interface Account {
   proxyUrl?: string;
   cooldownPeriod?: number;
   baseUrl?: string;
+  plan?: 'console' | 'go';
   quotaLimit?: number;
   state?: 'active' | 'cooling_down' | 'invalid';
   cooldownEndsInMs?: number;
@@ -49,6 +50,7 @@ export interface Provider {
   id: string;
   name: string;
   baseUrl: string;
+  plan?: 'console' | 'go';
   models: string[];
   enabled: boolean;
   protocol?: 'openai' | 'qwen-web' | 'deepseek-web' | 'zai-web';

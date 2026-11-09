@@ -7,11 +7,11 @@
  * - Spoofed IP hints (x-real-ip, x-forwarded-for, true-client-ip, cf-connecting-ip):
  *   OpenCode's edge overwrites/rejects these, so forwarding them is at best noise.
  * - Stale `authorization` — we attach the pool token ourselves.
- * - `x-session-id` / `x-opencode-session` — we manage session ids centrally and
- *   rotate them on 429 (see sessionManager).
+ * - `x-session-id` / `x-opencode-session` — we manage stable per-account
+ *   session ids centrally (see sessionManager).
  * - Telemetry blobs (`telemetry`, `clientTelemetry`) in JSON payloads.
- * - Persistent `session_id` GUIDs inside JSON payloads are replaced with a fresh
- *   session id on every retry cycle.
+ * - Persistent `session_id` GUIDs inside JSON payloads are replaced with the
+ *   account's stable session id.
  */
 
 /** Headers never forwarded upstream. */
@@ -46,19 +46,19 @@ function isGuidLike(s: string): boolean {
 }
 
 /** Deep-clone a JSON payload, dropping telemetry and swapping stale session GUIDs. */
-export function sanitizePayload<T>(body: T, freshSessionId: string): T {
+export function sanitizePayload<T>(body: T, sessionId: string): T {
   if (body === null || typeof body !== 'object') return body;
   if (Array.isArray(body)) {
-    return body.map((v) => sanitizePayload(v, freshSessionId)) as unknown as T;
+    return body.map((v) => sanitizePayload(v, sessionId)) as unknown as T;
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
     if (TELEMETRY_FIELDS.has(k)) continue;
     if ((k === 'session_id' || k === 'sessionId') && typeof v === 'string' && isGuidLike(v)) {
-      out[k] = freshSessionId;
+      out[k] = sessionId;
       continue;
     }
-    out[k] = sanitizePayload(v, freshSessionId);
+    out[k] = sanitizePayload(v, sessionId);
   }
   return out as T;
 }

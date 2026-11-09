@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mcptears/opencode-max/zen"
 )
 
 // ---------------------------------------------------------------------------
@@ -198,15 +200,15 @@ func (s *Server) aggregateModels(ctx context.Context) []any {
 			}
 			tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			req, err := http.NewRequestWithContext(tctx, http.MethodGet, strings.TrimRight(p.BaseURL, "/")+"/models", nil)
+			req, err := http.NewRequestWithContext(tctx, http.MethodGet, zen.Endpoint(p.BaseURL, "/models"), nil)
 			if err != nil {
 				return
 			}
 			if acct != nil && acct.APIKey != "" {
 				req.Header.Set("Authorization", "Bearer "+acct.APIKey)
 			}
-			if strings.Contains(p.BaseURL, "opencode.ai/zen") {
-				req.Header.Set("User-Agent", "opencode/1.18.31")
+			if zen.IsGateway(p.BaseURL) {
+				req.Header.Set("User-Agent", zen.UserAgent)
 			}
 			rt := s.deps.Rotator.RoundTripperFor(s.deps.Rotator.Current(), s.deps.Rotator.CurrentFamily())
 			client := &http.Client{Transport: rt}

@@ -24,7 +24,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Port != 8080 {
 		t.Errorf("Port = %d, want 8080", c.Port)
 	}
-	if c.UpstreamBase != "https://opencode.ai/zen/v1" {
+	if c.UpstreamBase != "https://opencode.ai/inference" {
 		t.Errorf("UpstreamBase = %q", c.UpstreamBase)
 	}
 	if c.MaxRetries != 5 || c.RetryBaseMs != 1000 || c.RetryMaxMs != 30000 {

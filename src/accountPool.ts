@@ -7,6 +7,7 @@ export interface AccountStatus {
   name: string;
   provider: string;
   priority: number;
+  plan?: 'console' | 'go';
   state: 'active' | 'cooling_down' | 'invalid';
   cooldownEndsInMs: number;
   /** Requests in the trailing 5h window (quota tracking). */
@@ -50,11 +51,21 @@ export class AccountPool {
     this.quota = quota;
   }
 
+  /** Cooldown key: account-wide, or scoped to one model (Zen Go limits are per-model). */
+  private static coolingKey(id: string, model?: string): string {
+    return model ? `${id}\u0000${model}` : id;
+  }
+
+  private static baseAccountId(key: string): string {
+    const i = key.indexOf('\u0000');
+    return i < 0 ? key : key.slice(0, i);
+  }
+
   /** Hot-swap the pool (dashboard edits). Cooling state is preserved by account id. */
   replace(accounts: AccountConfig[]): void {
     const known = new Set(accounts.map((a) => a.id));
     for (const id of [...this.coolingUntil.keys()]) {
-      if (!known.has(id)) this.coolingUntil.delete(id);
+      if (!known.has(AccountPool.baseAccountId(id))) this.coolingUntil.delete(id);
     }
     for (const id of [...this.invalid]) {
       if (!known.has(id)) this.invalid.delete(id);
@@ -71,7 +82,7 @@ export class AccountPool {
    *  (unknown latency counts as 0 so new accounts get tried).
    *  Accounts at the concurrency cap are skipped. A successful acquire
    *  increments the in-flight count — pair it with release(). */
-  acquire(provider?: string): AccountConfig | null {
+  acquire(provider?: string, model?: string): AccountConfig | null {
     const now = Date.now();
     for (const [id, until] of this.coolingUntil) {
       if (until <= now) this.coolingUntil.delete(id);
@@ -82,6 +93,7 @@ export class AccountPool {
       (a) =>
         !this.invalid.has(a.id) &&
         !this.coolingUntil.has(a.id) &&
+        (!model || !this.coolingUntil.has(AccountPool.coolingKey(a.id, model))) &&
         !this.quota?.isOverQuota(a.id, a.quotaLimit) &&
         (cap <= 0 || (this.inflight.get(a.id) ?? 0) < cap),
     );
@@ -159,8 +171,9 @@ export class AccountPool {
     let min = 0;
     for (const [id, until] of this.coolingUntil) {
       if (until <= now) continue;
-      const acc = this.accounts.find((a) => a.id === id);
-      if (!acc || this.invalid.has(id)) continue;
+      const baseId = AccountPool.baseAccountId(id);
+      const acc = this.accounts.find((a) => a.id === baseId);
+      if (!acc || this.invalid.has(baseId)) continue;
       if (provider && acc.provider !== provider) continue;
       const wait = until - now;
       if (min === 0 || wait < min) min = wait;
@@ -168,10 +181,11 @@ export class AccountPool {
     return min;
   }
 
-  /** Park an account after a 429/quota hit. */
-  markLimited(id: string, cooldownMs?: number): void {
+  /** Park an account after a 429/quota hit (optionally for one model only). */
+  markLimited(id: string, cooldownMs?: number, model?: string): void {
     const acc = this.accounts.find((a) => a.id === id);
-    this.coolingUntil.set(id, Date.now() + (cooldownMs ?? acc?.cooldownPeriod ?? getSettings().defaultCooldownMs));
+    const ms = cooldownMs ?? acc?.cooldownPeriod ?? getSettings().defaultCooldownMs;
+    this.coolingUntil.set(AccountPool.coolingKey(id, model), Date.now() + ms);
   }
 
   /** Mark a key as dead (401 / invalid-key 403). Skipped until reset. */
@@ -183,7 +197,9 @@ export class AccountPool {
   /** Re-admit a key (dashboard reset after fixing it). */
   clearInvalid(id: string): void {
     this.invalid.delete(id);
-    this.coolingUntil.delete(id);
+    for (const key of [...this.coolingUntil.keys()]) {
+      if (AccountPool.baseAccountId(key) === id) this.coolingUntil.delete(key);
+    }
   }
 
   isInvalid(id: string): boolean {
@@ -210,6 +226,7 @@ export class AccountPool {
         name: a.name,
         provider: a.provider,
         priority: a.priority,
+        plan: a.plan,
         useProxy: a.useProxy,
         state,
         cooldownEndsInMs: state === 'cooling_down' ? Math.max(0, until - now) : 0,

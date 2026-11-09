@@ -12,6 +12,7 @@ import type { Alerter } from './alerts.js';
 import { matchProvider, defaultProvider, type ProviderConfig } from './providers.js';
 import { getSettings } from './settings.js';
 import { adminAuth } from './adminRoutes.js';
+import { CONSOLE_BASE, GO_BASE, ZEN_USER_AGENT, isGateway, normalizeBase, normalizePlan, zenEndpoint } from './zen.js';
 
 /**
  * Abort the upstream fetch if the client goes away mid-request.
@@ -125,8 +126,16 @@ export async function aggregateModels(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        const r = await fetch(`${p.baseUrl}/models`, {
-          headers: account?.apiKey ? { authorization: `Bearer ${account.apiKey}` } : {},
+        const plan = normalizePlan(p.plan);
+        let base = normalizeBase(p.baseUrl);
+        if (plan === 'go') base = GO_BASE;
+        else if (plan === 'console' && isGateway(base)) base = CONSOLE_BASE;
+        const url = isGateway(base) ? zenEndpoint(base, '/models') : `${base}/models`;
+        const headers: Record<string, string> = {};
+        if (account?.apiKey) headers.authorization = `Bearer ${account.apiKey}`;
+        if (isGateway(base)) headers['user-agent'] = ZEN_USER_AGENT;
+        const r = await fetch(url, {
+          headers,
           dispatcher: rotator.dispatcherFor(rotator.current(), rotator.currentFamily()),
           signal: controller.signal,
         } as RequestInit & { dispatcher?: unknown });

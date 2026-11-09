@@ -32,7 +32,7 @@ const (
 // Implemented by the quota package; the pool only reads through it.
 // A limit of 0 means "use the global default".
 type QuotaTracker interface {
-	Usage(id string) int
+	Usage5h(id string) int
 	IsOverQuota(id string, limit int) bool
 }
 
@@ -59,6 +59,7 @@ type AccountStatus struct {
 	Name           string
 	Provider       string
 	Priority       int
+	Plan           string
 	UsesProxy      bool
 	ProxyMode      string // effective: off | pool | single
 	ProxyURL       string // pinned proxy URL (raw; the wire adapter redacts it)
@@ -131,7 +132,7 @@ func (p *Pool) Replace(accounts []AccountConfig) {
 		known[a.ID] = struct{}{}
 	}
 	for id := range p.coolingUntil {
-		if _, ok := known[id]; !ok {
+		if _, ok := known[baseAccountID(id)]; !ok {
 			delete(p.coolingUntil, id)
 		}
 	}
@@ -166,12 +167,36 @@ func (p *Pool) find(id string) *AccountConfig {
 	return nil
 }
 
-func (p *Pool) usableLocked(a AccountConfig, now time.Time, checkCap bool) bool {
+// coolingKey scopes a cooldown to an account, optionally to one model. Zen
+// Go limits are per-model, so a 429 for one model must not park every model on
+// the account.
+func coolingKey(id, model string) string {
+	if model == "" {
+		return id
+	}
+	return id + "\x00" + model
+}
+
+func baseAccountID(key string) string {
+	for i := 0; i < len(key); i++ {
+		if key[i] == 0 {
+			return key[:i]
+		}
+	}
+	return key
+}
+
+func (p *Pool) usableLocked(a AccountConfig, now time.Time, checkCap bool, model string) bool {
 	if _, bad := p.invalid[a.ID]; bad {
 		return false
 	}
 	if until, cooling := p.coolingUntil[a.ID]; cooling && until.After(now) {
 		return false
+	}
+	if model != "" {
+		if until, cooling := p.coolingUntil[coolingKey(a.ID, model)]; cooling && until.After(now) {
+			return false
+		}
 	}
 	if p.quota != nil && p.quota.IsOverQuota(a.ID, a.QuotaLimit) {
 		return false
@@ -189,6 +214,12 @@ func (p *Pool) usableLocked(a AccountConfig, now time.Time, checkCap bool) bool 
 // latency counts as 0 so new accounts get tried). A successful acquire
 // increments the in-flight count — pair it with Release.
 func (p *Pool) Acquire(provider string) *AccountConfig {
+	return p.AcquireForModel(provider, "")
+}
+
+// AcquireForModel is Acquire with model-aware cooldowns: an account parked for
+// one model can still serve the provider's other models.
+func (p *Pool) AcquireForModel(provider, model string) *AccountConfig {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := time.Now()
@@ -199,7 +230,7 @@ func (p *Pool) Acquire(provider string) *AccountConfig {
 		if provider != "" && a.Provider != provider {
 			continue
 		}
-		if p.usableLocked(a, now, true) {
+		if p.usableLocked(a, now, true, model) {
 			usable = append(usable, a)
 		}
 	}
@@ -211,7 +242,7 @@ func (p *Pool) Acquire(provider string) *AccountConfig {
 		if p.quota == nil {
 			return 0
 		}
-		return p.quota.Usage(id)
+		return p.quota.Usage5h(id)
 	}
 	if p.opts.RoutingStrategy == RoutingLatency {
 		sort.SliceStable(usable, func(i, j int) bool {
@@ -335,7 +366,7 @@ func (p *Pool) HasCapacity(provider string) bool {
 		if provider != "" && a.Provider != provider {
 			continue
 		}
-		if p.usableLocked(a, now, true) {
+		if p.usableLocked(a, now, true, "") {
 			return true
 		}
 	}
@@ -353,7 +384,7 @@ func (p *Pool) NextAvailableIn(provider string) time.Duration {
 		if !until.After(now) {
 			continue
 		}
-		acc := p.find(id)
+		acc := p.find(baseAccountID(id))
 		if acc == nil {
 			continue
 		}
@@ -373,6 +404,12 @@ func (p *Pool) NextAvailableIn(provider string) time.Duration {
 // MarkLimited parks an account after a 429/quota hit. The cooldown is the
 // explicit override, then the account's cooldownPeriod, then the default.
 func (p *Pool) MarkLimited(id string, cooldownMs time.Duration) {
+	p.MarkLimitedModel(id, "", cooldownMs)
+}
+
+// MarkLimitedModel parks an account for one model (or account-wide when model
+// is empty) after a 429/quota hit.
+func (p *Pool) MarkLimitedModel(id, model string, cooldownMs time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	cd := cooldownMs
@@ -383,7 +420,7 @@ func (p *Pool) MarkLimited(id string, cooldownMs time.Duration) {
 			cd = p.opts.DefaultCooldownMs
 		}
 	}
-	p.coolingUntil[id] = time.Now().Add(cd)
+	p.coolingUntil[coolingKey(id, model)] = time.Now().Add(cd)
 }
 
 // MarkInvalid flags a key as dead (401 / invalid-key 403). Skipped until reset.
@@ -401,6 +438,11 @@ func (p *Pool) ResetAccount(id string) {
 	defer p.mu.Unlock()
 	delete(p.invalid, id)
 	delete(p.coolingUntil, id)
+	for key := range p.coolingUntil {
+		if baseAccountID(key) == id {
+			delete(p.coolingUntil, key)
+		}
+	}
 }
 
 // IsInvalid reports whether the account is flagged invalid.
@@ -457,13 +499,14 @@ func (p *Pool) Status() []AccountStatus {
 		}
 		usage := 0
 		if p.quota != nil {
-			usage = p.quota.Usage(a.ID)
+			usage = p.quota.Usage5h(a.ID)
 		}
 		out = append(out, AccountStatus{
 			ID:             a.ID,
 			Name:           a.Name,
 			Provider:       a.Provider,
 			Priority:       a.Priority,
+			Plan:           a.Plan,
 			UsesProxy:      a.ProxyEnabled(),
 			ProxyMode:      a.ProxyModeEffective(),
 			ProxyURL:       a.ProxyURL,

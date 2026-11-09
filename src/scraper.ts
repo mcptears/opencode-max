@@ -240,7 +240,7 @@ export async function fetchProvider(provider: ProxyProvider, timeoutMs = 20000):
 }
 
 /** Test whether a proxy can reach upstream. */
-export async function testProxy(proxy: string, target = 'https://opencode.ai/zen/v1/models', timeoutMs = 8000): Promise<boolean> {
+export async function testProxy(proxy: string, target = 'https://opencode.ai/inference/v1/models', timeoutMs = 8000): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

@@ -35,6 +35,7 @@ export default function ConnectAccount({ providerId, providerName, onClose, onDo
   const [token, setToken] = useState('');
   const [cookies, setCookies] = useState('');
   const [name, setName] = useState('');
+  const [plan, setPlan] = useState<'console' | 'go'>('console');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -46,6 +47,7 @@ export default function ConnectAccount({ providerId, providerName, onClose, onDo
       name: acctName,
       provider: providerId,
       apiKey,
+      ...(providerId === 'opencode-zen' ? { plan } : {}),
       ...(extraCookies ? { cookies: extraCookies } : {}),
     });
     if (!res.ok) throw new Error(res.error || 'failed to save account');
@@ -95,7 +97,10 @@ export default function ConnectAccount({ providerId, providerName, onClose, onDo
         if (!v.ok) throw new Error(v.error || 'token rejected');
         await createAccount(cred);
       } else {
-        const v = await api.post<ApiRes>('/api/accounts/validate', { apiKey: cred });
+        const v = await api.post<ApiRes>('/api/accounts/validate', {
+          apiKey: cred,
+          ...(providerId === 'opencode-zen' ? { plan } : {}),
+        });
         if (!v.ok) throw new Error(v.error || 'key rejected');
         await createAccount(cred);
       }
@@ -112,7 +117,7 @@ export default function ConnectAccount({ providerId, providerName, onClose, onDo
     ? 'Sign in at chat.qwen.ai, then DevTools (F12) → Application → Local Storage → copy the "token" value.'
     : providerId === 'deepseek'
     ? 'Sign in at chat.deepseek.com, then copy the session token. Paste-token needs the browser cookies too — sign-in is more reliable.'
-    : 'Paste your OpenAI-compatible API key.';
+    : 'Paste your OpenCode Zen API key. Free-tier models are reserved for the official OpenCode client — use a paid Console model or a Go plan.';
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -166,6 +171,15 @@ export default function ConnectAccount({ providerId, providerName, onClose, onDo
               <div style={{ marginTop: 12 }}>
                 <label style={{ fontSize: 13, color: 'var(--muted)' }}>Cookies (optional)</label>
                 <textarea style={{ ...inputStyle, minHeight: 60, fontFamily: 'monospace', fontSize: 12 }} value={cookies} onChange={(e) => setCookies(e.target.value)} placeholder="name=value; ..." />
+              </div>
+            )}
+            {providerId === 'opencode-zen' && (
+              <div style={{ marginTop: 12 }}>
+                <label style={{ fontSize: 13, color: 'var(--muted)' }}>Plan</label>
+                <select style={inputStyle} value={plan} onChange={(e) => setPlan(e.target.value as 'console' | 'go')}>
+                  <option value="console">Console — pay-as-you-go / balance</option>
+                  <option value="go">OpenCode Go</option>
+                </select>
               </div>
             )}
             <p style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>{pasteHint}</p>

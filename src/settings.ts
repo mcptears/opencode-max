@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CONFIG } from './config.js';
 import { globMatch } from './providers.js';
+import { CONSOLE_BASE, normalizeBase } from './zen.js';
 
 export interface Settings {
   port: number;
@@ -73,7 +74,7 @@ const bool = (v: string | undefined, fallback: boolean): boolean => {
 function fromEnv(): Settings {
   return {
     port: num(process.env.PORT, 8080),
-    upstreamBase: (process.env.UPSTREAM_BASE ?? 'https://opencode.ai/zen/v1').replace(/\/+$/, ''),
+    upstreamBase: normalizeBase(process.env.UPSTREAM_BASE ?? CONSOLE_BASE),
     maxRetries: num(process.env.MAX_RETRIES, 5),
     retryBaseMs: num(process.env.RETRY_BASE_MS, 1000),
     retryMaxMs: num(process.env.RETRY_MAX_MS, 30000),
@@ -179,7 +180,7 @@ let current: Settings = (() => {
       const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) as Partial<Settings>;
       return {
         port: num(raw.port, base.port),
-        upstreamBase: typeof raw.upstreamBase === 'string' && raw.upstreamBase ? raw.upstreamBase.replace(/\/+$/, '') : base.upstreamBase,
+        upstreamBase: typeof raw.upstreamBase === 'string' && raw.upstreamBase ? normalizeBase(raw.upstreamBase) : base.upstreamBase,
         maxRetries: num(raw.maxRetries, base.maxRetries),
         retryBaseMs: num(raw.retryBaseMs, base.retryBaseMs),
         retryMaxMs: num(raw.retryMaxMs, base.retryMaxMs),
@@ -238,7 +239,7 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     port: patch.port !== undefined ? num(patch.port, current.port) : current.port,
     upstreamBase:
       typeof patch.upstreamBase === 'string' && patch.upstreamBase
-        ? patch.upstreamBase.replace(/\/+$/, '')
+        ? normalizeBase(patch.upstreamBase)
         : current.upstreamBase,
     maxRetries: patch.maxRetries !== undefined ? num(patch.maxRetries, current.maxRetries) : current.maxRetries,
     retryBaseMs: patch.retryBaseMs !== undefined ? num(patch.retryBaseMs, current.retryBaseMs) : current.retryBaseMs,

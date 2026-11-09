@@ -21,6 +21,7 @@ import (
 	"github.com/mcptears/opencode-max/providers"
 	"github.com/mcptears/opencode-max/proxy"
 	"github.com/mcptears/opencode-max/quota"
+	"github.com/mcptears/opencode-max/session"
 	"github.com/mcptears/opencode-max/zaitokens"
 	"github.com/mcptears/opencode-max/store"
 	"github.com/mcptears/opencode-max/types"
@@ -52,8 +53,19 @@ func main() {
 	// Account pool.
 	p := pool.New(accounts, pool.Options{DefaultCooldownMs: time.Duration(cfg.DefaultCooldownMs) * time.Millisecond})
 
-	// Quota tracker.
-	qt := quota.New(database, 0)
+	// Settings (loaded early so quota uses the configured 5h budget).
+	settingsStore := store.NewSettingsStore(store.DefaultSettingsPath())
+	settings := settingsStore.LoadOrDefault(types.Settings{})
+
+	// Quota tracker. An unset/zero settings value falls back to the same
+	// 200-request default the Node build uses; a non-positive limit means
+	// "no enforcement" (see quota.IsOverQuota).
+	quotaLimit := settings.Quota5hLimit
+	if quotaLimit <= 0 {
+		quotaLimit = 200
+	}
+	qt := quota.New(database, quotaLimit)
+	p.SetQuotaTracker(qt)
 
 	// Metrics.
 	m := metrics.New(database)
@@ -61,9 +73,6 @@ func main() {
 	// Providers.
 	providerPath := providers.DefaultPath()
 	providerStore := wire.NewProviderStore(providerPath)
-
-	// Settings.
-	settingsStore := store.NewSettingsStore(store.DefaultSettingsPath())
 
 	// HTTP client for direct egress.
 	httpClient := &http.Client{Timeout: time.Duration(cfg.RequestTimeoutMs) * time.Millisecond}
@@ -82,10 +91,11 @@ func main() {
 		Metrics:   metricsAdapter,
 		DefaultCooldown: time.Duration(cfg.DefaultCooldownMs) * time.Millisecond,
 		MaxRetries:      cfg.MaxRetries,
+		Sessions:        session.New(),
+		Quota:           qt,
 		ZaiTokenPool:    zaitokens.NewStore(database),
 		OnZaiPoolEmpty: func() { api.TriggerZaiCollect(20) },
 	}
-	_ = qt
 
 	deps := api.Deps{
 		Pool:       poolAdapter,

@@ -19,7 +19,26 @@ func TestFreshFormat(t *testing.T) {
 	}
 }
 
-func TestRotate(t *testing.T) {
+func TestStablePerAccount(t *testing.T) {
+	m := New()
+	first := m.IDFor("acct-a")
+	if !strings.HasPrefix(first, "ses_") {
+		t.Fatalf("expected ses_ prefix, got %q", first)
+	}
+	if second := m.IDFor("acct-a"); second != first {
+		t.Fatalf("session id should be stable per account: %q != %q", first, second)
+	}
+	other := m.IDFor("acct-b")
+	if other == first {
+		t.Fatal("different accounts should get different session ids")
+	}
+	m.Forget("acct-a")
+	if got := m.IDFor("acct-a"); got == first {
+		t.Fatal("Forget should drop the account's session id")
+	}
+}
+
+func TestRotateFallback(t *testing.T) {
 	m := New()
 	first := m.ID()
 	if first == "" {
@@ -42,11 +61,15 @@ func TestConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = m.ID()
+			_ = m.IDFor("shared")
 			_ = m.Rotate()
 		}()
 	}
 	wg.Wait()
 	if m.ID() == "" {
 		t.Fatal("expected non-empty id after concurrent use")
+	}
+	if m.IDFor("shared") == "" {
+		t.Fatal("expected non-empty account id after concurrent use")
 	}
 }

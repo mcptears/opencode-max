@@ -16,6 +16,16 @@ import { loadProviders as loadScraperProviders, saveProviders as saveScraperProv
 import { loadProviders, saveProviders, QWEN_PRESET, DEEPSEEK_PRESET, ZAI_PRESET, type ProviderConfig } from './providers.js';
 import { validateZaiCredential } from './zaiWeb.js';
 import type { ScraperJob } from './scraperJob.js';
+import {
+  ZEN_USER_AGENT,
+  baseForPlan,
+  isGateway,
+  normalizeBase,
+  normalizePlan,
+  pickPaidModel,
+  planFromBase,
+  zenEndpoint,
+} from './zen.js';
 
 export interface AdminContext {
   pool: AccountPool;
@@ -43,7 +53,11 @@ function validateAccount(a: unknown): { ok: true; account: AccountConfig } | { o
     /** When false, this account connects directly (no proxy). Default true (legacy behavior). */
     useProxy: r.useProxy === false ? false : undefined,
     cooldownPeriod: typeof r.cooldownPeriod === 'number' && r.cooldownPeriod > 0 ? r.cooldownPeriod : undefined,
-    baseUrl: typeof r.baseUrl === 'string' && (r.baseUrl as string).trim() ? (r.baseUrl as string).trim() : undefined,
+    baseUrl:
+      typeof r.baseUrl === 'string' && (r.baseUrl as string).trim()
+        ? normalizeBase((r.baseUrl as string).trim())
+        : undefined,
+    plan: normalizePlan(r.plan) ?? undefined,
     quotaLimit:
       typeof r.quotaLimit === 'number' && Number.isFinite(r.quotaLimit) && r.quotaLimit > 0
         ? Math.floor(r.quotaLimit)
@@ -319,20 +333,38 @@ export function buildAdminRouter(ctx: AdminContext): Router {
 
   /** Check an API key against upstream without adding it (Connect flow).
    *  The models catalog is public, so validation sends a minimal 1-token
-   *  chat ping: 401 with an auth-flavoured body means a bad key; anything
-   *  else (200, 429, model errors) means the key itself is accepted. */
+   *  chat ping against a *paid* model (or any Go model): free-tier models are
+   *  reserved for the official OpenCode client and return 403 elsewhere. */
   router.post('/api/accounts/validate', async (req, res) => {
-    const body = jsonBody(req) as { apiKey?: unknown; baseUrl?: unknown };
+    const body = jsonBody(req) as { apiKey?: unknown; baseUrl?: unknown; plan?: unknown };
     const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
     if (!apiKey) {
       res.status(400).json({ ok: false, error: 'API key is required' });
       return;
     }
-    const base =
-      typeof body.baseUrl === 'string' && body.baseUrl
-        ? body.baseUrl.replace(/\/+$/, '')
-        : getSettings().upstreamBase;
-    const authHeaders = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' };
+
+    // Resolve the gateway + plan. Console (pay-as-you-go) and Go live on
+    // different roots; legacy /zen/v1 bases migrate automatically.
+    let base = normalizeBase(getSettings().upstreamBase);
+    let plan = planFromBase(base);
+    const requestedPlan = normalizePlan(body.plan);
+    if (requestedPlan) {
+      plan = requestedPlan;
+      base = baseForPlan(plan);
+    }
+    if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) {
+      base = normalizeBase(body.baseUrl.trim());
+      if (body.plan === undefined) plan = planFromBase(base);
+    }
+    const gateway = isGateway(base);
+    if (gateway) base = baseForPlan(plan);
+
+    const authHeaders: Record<string, string> = {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    };
+    if (gateway) authHeaders['user-agent'] = ZEN_USER_AGENT;
+
     const withTimeout = async (url: string, init: RequestInit): Promise<Response> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20000);
@@ -343,21 +375,42 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       }
     };
     try {
-      // Pick a real, non-free model for the ping.
-      const modelsRes = await withTimeout(`${base}/models`, { headers: authHeaders });
+      const modelsUrl = gateway ? zenEndpoint(base, '/models') : `${base}/models`;
+      const modelsRes = await withTimeout(modelsUrl, { headers: authHeaders });
       if (modelsRes.status === 401 || modelsRes.status === 403) {
         res.json({ ok: false, error: 'key rejected by upstream (401/403) — check the key' });
         return;
       }
-      let model = 'big-pickle';
+      let ids: string[] = [];
       try {
         const catalog = (await modelsRes.json()) as { data?: { id?: string }[] };
-        const ids = (catalog.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string');
-        model = ids.find((id) => !id.endsWith('-free')) ?? ids[0] ?? model;
+        ids = (catalog.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string');
       } catch {
-        /* fall back to default probe model */
+        /* fall back below */
       }
-      const ping = await withTimeout(`${base}/chat/completions`, {
+
+      let model: string | null = null;
+      if (gateway && plan !== 'go') {
+        model = pickPaidModel(ids);
+        if (!model) {
+          res.json({
+            ok: false,
+            error:
+              'this key only exposes free-tier models, which OpenCode reserves for its own client — use a paid Console model or a Go plan',
+          });
+          return;
+        }
+      } else if (ids.length > 0) {
+        model = ids[0];
+      } else if (gateway) {
+        res.json({ ok: false, error: 'could not read the model catalog — check the key and plan' });
+        return;
+      } else {
+        model = 'big-pickle';
+      }
+
+      const pingUrl = gateway ? zenEndpoint(base, '/chat/completions') : `${base}/chat/completions`;
+      const ping = await withTimeout(pingUrl, {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
@@ -373,6 +426,23 @@ export function buildAdminRouter(ctx: AdminContext): Router {
           res.json({ ok: false, error: 'key rejected by upstream — check the key' });
           return;
         }
+      }
+      if (ping.status === 403 && gateway) {
+        let probe = '';
+        try {
+          probe = (await ping.text()).toLowerCase();
+        } catch {
+          /* ignore */
+        }
+        if (/free|opencode/.test(probe)) {
+          res.json({
+            ok: false,
+            error: 'free-tier models are only available from within OpenCode — use a paid model or a Go plan',
+          });
+          return;
+        }
+        res.json({ ok: false, error: 'access denied by upstream (403) — check the key and plan' });
+        return;
       }
       res.json({ ok: true });
     } catch {
@@ -494,7 +564,7 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     const b = (body ?? {}) as Record<string, unknown>;
     const id = typeof b.id === 'string' ? b.id.trim() : '';
     const name = typeof b.name === 'string' ? b.name.trim() : '';
-    const baseUrl = typeof b.baseUrl === 'string' ? b.baseUrl.trim().replace(/\/+$/, '') : '';
+    const baseUrl = typeof b.baseUrl === 'string' ? normalizeBase(b.baseUrl.trim()) : '';
     const models = Array.isArray(b.models)
       ? (b.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.trim().length > 0).map((m) => m.trim())
       : [];
@@ -506,7 +576,15 @@ export function buildAdminRouter(ctx: AdminContext): Router {
     } catch {
       return { ok: false, error: 'baseUrl is not a valid URL' };
     }
-    const provider: ProviderConfig = { id, name: name || id, baseUrl, models: models.length > 0 ? models : ['*'], enabled: b.enabled !== false };
+    const plan = normalizePlan(b.plan) ?? (isGateway(baseUrl) ? planFromBase(baseUrl) : undefined);
+    const provider: ProviderConfig = {
+      id,
+      name: name || id,
+      baseUrl,
+      ...(plan ? { plan } : {}),
+      models: models.length > 0 ? models : ['*'],
+      enabled: b.enabled !== false,
+    };
     if (b.protocol === 'qwen-web') {
       const q = (b.qwen ?? {}) as Record<string, unknown>;
       const modelMap: Record<string, string> = {};
@@ -670,22 +748,26 @@ export function buildAdminRouter(ctx: AdminContext): Router {
   });
 
   /** One-click restore: the default OpenCode Zen provider. */
-  router.post('/api/providers/preset/opencode-zen', (_req, res) => {
+  router.post('/api/providers/preset/opencode-zen', (req, res) => {
     const providers = loadProviders();
     if (providers.some((p) => p.id === 'opencode-zen')) {
       res.status(409).json({ error: { message: 'opencode-zen provider already exists', status: 409 } });
       return;
     }
-    providers.push({
+    const body = jsonBody(req) as { plan?: unknown };
+    const plan = normalizePlan(body.plan) ?? planFromBase(normalizeBase(getSettings().upstreamBase));
+    const provider: ProviderConfig = {
       id: 'opencode-zen',
       name: 'OpenCode Zen',
-      baseUrl: getSettings().upstreamBase,
+      baseUrl: baseForPlan(plan),
+      plan,
       models: ['*'],
       enabled: true,
-    });
+    };
+    providers.push(provider);
     saveProviders(providers);
     metrics.record('settings', 'opencode-zen provider restored');
-    res.json({ ok: true, provider: providers[providers.length - 1] });
+    res.json({ ok: true, provider });
   });
 
   /** One-click preset: native Z.ai web provider (built into opencode-max). */
@@ -778,8 +860,16 @@ export function buildAdminRouter(ctx: AdminContext): Router {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        const r = await fetch(`${p.baseUrl}/models`, {
-          headers: account?.apiKey ? { authorization: `Bearer ${account.apiKey}` } : {},
+        const plan = normalizePlan(p.plan);
+        let base = normalizeBase(p.baseUrl);
+        if (plan) base = baseForPlan(plan);
+        else if (isGateway(base)) base = baseForPlan(planFromBase(base));
+        const url = isGateway(base) ? zenEndpoint(base, '/models') : `${base}/models`;
+        const headers: Record<string, string> = {};
+        if (account?.apiKey) headers.authorization = `Bearer ${account.apiKey}`;
+        if (isGateway(base)) headers['user-agent'] = ZEN_USER_AGENT;
+        const r = await fetch(url, {
+          headers,
           dispatcher: rotator.dispatcherFor(rotator.current(), rotator.currentFamily()),
           signal: controller.signal,
         } as RequestInit & { dispatcher?: unknown });

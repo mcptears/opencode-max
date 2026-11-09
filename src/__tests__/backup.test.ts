@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import fs from 'node:fs';
-import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { buildAdminRouter } from '../adminRoutes.js';
@@ -11,13 +10,13 @@ import { SessionManager } from '../sessionManager.js';
 import { Metrics } from '../metrics.js';
 import { ScraperJob } from '../scraperJob.js';
 import { saveSettings } from '../settings.js';
-import { projectRoot } from '../paths.js';
+import { PROVIDERS_FILE } from '../providers.js';
 
 let base = '';
 let server: Server | null = null;
 const auth = { Authorization: 'Bearer test-token' };
-// providers.json has no env override — clean up anything the restore writes.
-const providersFile = path.join(projectRoot(), 'providers.json');
+// Clean up anything the restore writes to the isolated registry file.
+const providersFile = PROVIDERS_FILE;
 
 beforeAll(async () => {
   saveSettings({ adminToken: 'test-token' });

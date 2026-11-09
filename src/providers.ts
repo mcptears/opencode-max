@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CONFIG } from './config.js';
 import { projectRoot } from './paths.js';
+import { isGateway, normalizeBase, normalizePlan, planFromBase, type ZenPlan } from './zen.js';
 
 export interface QwenWebOptions {
   /** Default Qwen web model id when the request model has no mapping. */
@@ -36,8 +37,10 @@ export interface ProviderConfig {
   /** Stable id, e.g. "opencode-zen". Accounts reference it via their `provider` field. */
   id: string;
   name: string;
-  /** OpenAI-compatible base URL, e.g. https://opencode.ai/zen/v1 */
+  /** OpenAI-compatible base URL, e.g. https://opencode.ai/inference */
   baseUrl: string;
+  /** Zen gateway plan: 'console' or 'go' (only meaningful for Zen). */
+  plan?: ZenPlan;
   /** Glob patterns matched against the request model, in order. `*` = catch-all. */
   models: string[];
   enabled: boolean;
@@ -56,7 +59,10 @@ export interface ProviderConfig {
   zai?: ZaiWebOptions;
 }
 
-export const PROVIDERS_FILE = path.join(projectRoot(), 'providers.json');
+// PROVIDERS_FILE lets tests (and custom deployments) relocate the registry,
+// mirroring ACCOUNTS_FILE / PROXIES_FILE.
+export const PROVIDERS_FILE =
+  process.env.PROVIDERS_FILE ?? path.join(projectRoot(), 'providers.json');
 
 /** One-click preset: native DeepSeek web provider (built into opencode-max). */
 export const DEEPSEEK_PRESET: ProviderConfig = {
@@ -111,11 +117,13 @@ export const QWEN_PRESET: ProviderConfig = {
 };
 
 function defaultProviders(): ProviderConfig[] {
+  const baseUrl = normalizeBase(CONFIG.upstreamBase);
   return [
     {
       id: 'opencode-zen',
       name: 'OpenCode Zen',
-      baseUrl: CONFIG.upstreamBase,
+      baseUrl,
+      plan: planFromBase(baseUrl),
       models: ['*'],
       enabled: true,
     },
@@ -135,6 +143,8 @@ function normalize(p: unknown): ProviderConfig | null {
   const models = Array.isArray(r.models)
     ? (r.models as unknown[]).filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
     : [];
+  const baseUrl = normalizeBase(r.baseUrl as string);
+  const plan = normalizePlan(r.plan) ?? (isGateway(baseUrl) ? planFromBase(baseUrl) : undefined);
   const protocol = r.protocol === 'qwen-web' || r.protocol === 'deepseek-web' || r.protocol === 'zai-web' ? r.protocol : 'openai';
   let qwen: QwenWebOptions | undefined;
   if (protocol === 'qwen-web' && r.qwen && typeof r.qwen === 'object') {
@@ -185,7 +195,8 @@ function normalize(p: unknown): ProviderConfig | null {
   return {
     id: r.id.trim(),
     name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : r.id.trim(),
-    baseUrl: (r.baseUrl as string).trim().replace(/\/+$/, ''),
+    baseUrl,
+    ...(plan ? { plan } : {}),
     models: models.length > 0 ? models : ['*'],
     enabled: r.enabled !== false,
     ...(protocol === 'qwen-web' ? { protocol, qwen: qwen ?? { defaultModel: 'qwen3.7-plus' } } : {}),
